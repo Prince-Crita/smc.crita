@@ -142,7 +142,7 @@ export default async function CarryForwardPage() {
 
               {/* Items */}
               <div className="divide-y divide-slate-800/50">
-                {group.items.map((item) => (
+                {group.items.map((item: any) => (
                   <div key={item.id} className="px-5 py-3 flex items-start gap-4">
                     {item.isCompleted ? (
                       <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
