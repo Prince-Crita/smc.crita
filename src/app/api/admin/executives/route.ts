@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
       orderBy: { name: "asc" },
     });
 
-    const result = executives.map((exec) => {
+    const result = executives.map((exec: any) => {
       let pendingCount = 0;
       let inProgressCount = 0;
       let closedCount = 0;

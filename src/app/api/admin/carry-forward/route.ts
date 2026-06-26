@@ -93,7 +93,7 @@ export async function GET(request: NextRequest) {
       executiveName: subtasks[0].task.visit.executive.name,
       visitStatus: subtasks[0].task.visit.status,
       scheduledDate: subtasks[0].task.visit.scheduledDate,
-      carriedItems: subtasks.map((s) => ({
+      carriedItems: subtasks.map((s: any) => ({
         id: s.id,
         title: s.title,
         taskTitle: s.task.title,
