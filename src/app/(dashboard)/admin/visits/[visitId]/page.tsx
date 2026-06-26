@@ -44,7 +44,9 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
   0
 );
   const progress = totalSubtasks === 0 ? 0 : Math.round((completedSubtasks / totalSubtasks) * 100);
-  const summary = visit.summaryJson as Record<string, unknown> | null;
+  const summary = visit.summaryJson as {
+  overallRating?: string;
+} | null;
 
   return (
     <div className="space-y-5 max-w-4xl">
@@ -100,9 +102,14 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
         <div className="lg:col-span-2 space-y-3">
           <h2 className="text-base font-semibold text-white">Task Details</h2>
           {visit.tasks.map((task: any) => {
-            const completed = task.subtasks.filter((s: any) => s.isCompleted).length;
+            const completed = task.subtasks.filter(
+              (s: any) => s.isCompleted
+            ).length;
+
             const total = task.subtasks.length;
-            const pct = total === 0 ? 0 : Math.round((completed / total) * 100);
+
+            const pct =
+              total === 0 ? 0 : Math.round((completed / total) * 100);
             return (
               <div key={task.id} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
                 <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
@@ -118,7 +125,7 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
                   <span className="text-xs text-slate-400">{completed}/{total}</span>
                 </div>
                 <div className="divide-y divide-slate-800/50">
-                  {task.subtasks.map((subtask) => (
+                  {task.subtasks.map((subtask: any) => (
                     <div key={subtask.id} className="px-4 py-2.5 flex items-start gap-3">
                       {subtask.isCompleted ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0" /> : <XCircle className="w-3.5 h-3.5 text-red-400/60 mt-0.5 flex-shrink-0" />}
                       <div className="flex-1 min-w-0">
@@ -142,7 +149,7 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
         <div className="space-y-3">
           <h2 className="text-base font-semibold text-white">Activity Log</h2>
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-0">
-            {visit.activityLogs.map((log, idx) => (
+            {visit.activityLogs.map((log: any, idx: number) => (
               <div key={log.id} className="flex gap-3">
                 <div className="flex flex-col items-center">
                   <div className="w-2 h-2 rounded-full bg-blue-500 mt-1 flex-shrink-0" />
