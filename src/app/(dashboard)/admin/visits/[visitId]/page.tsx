@@ -34,8 +34,15 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
 
   if (!visit) notFound();
 
-  const totalSubtasks = visit.tasks.reduce((s, t) => s + t.subtasks.length, 0);
-  const completedSubtasks = visit.tasks.reduce((s, t) => s + t.subtasks.filter((st) => st.isCompleted).length, 0);
+  const totalSubtasks = visit.tasks.reduce(
+  (s: number, t: any) => s + t.subtasks.length,
+  0
+);
+  const completedSubtasks = visit.tasks.reduce(
+  (s: number, t: any) =>
+    s + t.subtasks.filter((st: any) => st.isCompleted).length,
+  0
+);
   const progress = totalSubtasks === 0 ? 0 : Math.round((completedSubtasks / totalSubtasks) * 100);
   const summary = visit.summaryJson as Record<string, unknown> | null;
 
