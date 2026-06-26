@@ -99,8 +99,8 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
         {/* Tasks */}
         <div className="lg:col-span-2 space-y-3">
           <h2 className="text-base font-semibold text-white">Task Details</h2>
-          {visit.tasks.map((task) => {
-            const completed = task.subtasks.filter((s) => s.isCompleted).length;
+          {visit.tasks.map((task: any) => {
+            const completed = task.subtasks.filter((s: any) => s.isCompleted).length;
             const total = task.subtasks.length;
             const pct = total === 0 ? 0 : Math.round((completed / total) * 100);
             return (
