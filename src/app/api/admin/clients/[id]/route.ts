@@ -26,7 +26,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     if (!client) return NextResponse.json({ error: "Client not found" }, { status: 404 });
 
-    const visits = client.visits.map((v) => {
+    const visits = client.visits.map((v: any) => {
       const total = v.tasks.reduce((s, t) => s + t.subtasks.length, 0);
       const done = v.tasks.reduce((s, t) => s + t.subtasks.filter((st) => st.isCompleted).length, 0);
       const progress = total === 0 ? 0 : Math.round((done / total) * 100);

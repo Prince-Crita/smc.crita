@@ -26,7 +26,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     if (!exec) return NextResponse.json({ error: "Executive not found" }, { status: 404 });
 
-    const visits = exec.assignedVisits.map((v) => {
+    const visits = exec.assignedVisits.map((v: any) => {
       const total = v.tasks.reduce((s, t) => s + t.subtasks.length, 0);
       const done = v.tasks.reduce((s, t) => s + t.subtasks.filter((st) => st.isCompleted).length, 0);
       const cfCount = v.tasks.reduce((s, t) => s + t.subtasks.filter((st) => st.isCarriedForward).length, 0);
