@@ -1,0 +1,5 @@
+stateDiagram-v2
+ [*] --> PENDING: Created
+ PENDING --> IN_PROGRESS: Executive toggles first subtask
+ IN_PROGRESS --> CLOSED: 100% Tasks Completed & Summary Generated
+ CLOSED --> [*]

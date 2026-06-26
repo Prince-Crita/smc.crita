@@ -1,0 +1,22 @@
+architecture-beta
+    group frontend(cloud)[Frontend (Next.js)]
+    service ui(server)[UI Components] in frontend
+    service pages(server)[Server Components] in frontend
+    
+    group backend(cloud)[Backend API (Next.js)]
+    service auth(server)[Auth Middleware] in backend
+    service api(server)[Route Handlers] in backend
+    
+    group db(database)[Database Layer]
+    service prisma(database)[Prisma ORM] in db
+    service neon(database)[Neon PostgreSQL] in db
+    
+    group external(cloud)[External Services]
+    service resend(server)[Resend Email API] in external
+
+    ui:R --> L:pages
+    pages:R --> L:auth
+    auth:R --> L:api
+    api:R --> L:prisma
+    prisma:R --> L:neon
+    api:B --> T:resend

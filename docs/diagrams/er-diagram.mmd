@@ -1,0 +1,40 @@
+erDiagram
+    USER ||--o{ VISIT : "assigned to"
+    USER ||--o{ CLIENT : "manages"
+    USER ||--o{ ACTIVITY_LOG : "performs"
+    CLIENT ||--o{ VISIT : "receives"
+    VISIT ||--o{ TASK : "contains"
+    VISIT ||--o{ ACTIVITY_LOG : "has"
+    VISIT ||--o{ VISIT_REASSIGNMENT : "undergoes"
+    TASK ||--o{ SUBTASK : "broken down into"
+    SUBTASK ||--o| SUBTASK : "carried forward from"
+
+    USER {
+        String id PK
+        String email UK
+        String passwordHash
+        Role role
+        Boolean isActive
+    }
+    CLIENT {
+        String id PK
+        String code UK
+        String name
+        Boolean isArchived
+    }
+    VISIT {
+        String id PK
+        String visitNumber UK
+        VisitStatus status
+        Float progress
+    }
+    TASK {
+        String id PK
+        TaskType taskType
+        TaskStatus status
+    }
+    SUBTASK {
+        String id PK
+        Boolean isCompleted
+        Boolean isCarriedForward
+    }

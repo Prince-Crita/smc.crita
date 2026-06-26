@@ -1,0 +1,20 @@
+sequenceDiagram
+ participant User
+ participant Client
+ participant AuthAPI as API (/api/auth/login)
+ participant Middleware
+ participant ProtectedAPI as API (/api/admin/*)
+ 
+ User->>Client: Enters Credentials
+ Client->>AuthAPI: POST {email, password}
+ AuthAPI->>AuthAPI: Verify bcrypt hash
+ AuthAPI->>Client: 200 OK + Set-Cookie: token (HttpOnly)
+ 
+ User->>Client: Navigates to /admin
+ Client->>Middleware: Request page
+ Middleware->>Middleware: Verify JWT & Role
+ Middleware->>Client: Allow or Redirect
+ 
+ Client->>ProtectedAPI: GET Request (includes cookie)
+ ProtectedAPI->>ProtectedAPI: Verify JWT
+ ProtectedAPI->>Client: JSON Response

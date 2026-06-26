@@ -1,0 +1,220 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  EXECUTIVE
+}
+
+enum VisitStatus {
+  PENDING
+  OPEN
+  CLOSED
+}
+
+// NOTE: TaskType enum kept for reference only.
+// Task.taskType and SubtaskTemplate.taskType fields are now String
+// to support custom task types per client beyond these 6 defaults.
+enum TaskType {
+  OPERATIONAL_VERIFICATION
+  STOCK_VERIFICATION
+  AVF_REPORT
+  ACCOUNTS_VERIFICATION
+  MR_MONTHLY_REPORT
+  MD_MEETING
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  PARTIALLY_COMPLETED
+}
+
+enum MdMeetingAnswer {
+  YES
+  NO
+}
+
+enum ActivityAction {
+  VISIT_CREATED
+  VISIT_OPENED
+  VISIT_CLOSED
+  TASK_STARTED
+  TASK_COMPLETED
+  SUBTASK_COMPLETED
+  SUBTASK_INCOMPLETE
+  CARRY_FORWARD_APPLIED
+  SUMMARY_GENERATED
+  USER_LOGIN
+  USER_LOGOUT
+  EXECUTIVE_ADDED
+  EXECUTIVE_UPDATED
+  EXECUTIVE_DEACTIVATED
+  EXECUTIVE_PASSWORD_RESET
+  CLIENT_ADDED
+  CLIENT_UPDATED
+  CLIENT_ARCHIVED
+  VISIT_REASSIGNED
+  SUBTASK_TEMPLATE_UPDATED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role
+  phone        String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assignedVisits     Visit[]             @relation("ExecutiveVisits")
+  assignedClients    Client[]            @relation("ClientAssignedExec")
+  activityLogs       ActivityLog[]
+  reassignmentsFrom  VisitReassignment[] @relation("ReassignFrom")
+  reassignmentsTo    VisitReassignment[] @relation("ReassignTo")
+  reassignmentsDone  VisitReassignment[] @relation("ReassignedBy")
+
+  @@map("users")
+}
+
+model Client {
+  id             String    @id @default(cuid())
+  name           String
+  code           String    @unique
+  contactPerson  String
+  address        String
+  phone          String?
+  email          String?
+  reportEmails   String[]  @default([])
+  assignedExecId String?
+  startDate      DateTime?
+  endDate        DateTime?
+  isArchived     Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  visits            Visit[]
+  assignedExec      User?              @relation("ClientAssignedExec", fields: [assignedExecId], references: [id])
+  subtaskTemplates  SubtaskTemplate[]  @relation("ClientSubtaskTemplates")
+
+  @@map("clients")
+}
+
+model Visit {
+  id            String      @id @default(cuid())
+  visitNumber   String      @unique
+  clientId      String
+  executiveId   String
+  status        VisitStatus @default(PENDING)
+  scheduledDate DateTime
+  openedAt      DateTime?
+  closedAt      DateTime?
+  summaryJson   Json?
+  notes         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  client        Client              @relation(fields: [clientId], references: [id])
+  executive     User                @relation("ExecutiveVisits", fields: [executiveId], references: [id])
+  tasks         Task[]
+  activityLogs  ActivityLog[]
+  reassignments VisitReassignment[]
+
+  @@map("visits")
+}
+
+model Task {
+  id              String           @id @default(cuid())
+  visitId         String
+  taskType        String           // Changed from TaskType enum → String (supports custom task types)
+  title           String
+  description     String?
+  status          TaskStatus       @default(PENDING)
+  orderIndex      Int
+  mdMeetingAnswer MdMeetingAnswer?
+  completedAt     DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  visit    Visit     @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  subtasks Subtask[]
+
+  @@unique([visitId, taskType])
+  @@map("tasks")
+}
+
+model Subtask {
+  id                 String    @id @default(cuid())
+  taskId             String
+  title              String
+  isCompleted        Boolean   @default(false)
+  incompletionReason String?
+  isCarriedForward   Boolean   @default(false)
+  sourceSubtaskId    String?
+  completedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  task            Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  sourceSubtask   Subtask?  @relation("CarryForward", fields: [sourceSubtaskId], references: [id])
+  carriedSubtasks Subtask[] @relation("CarryForward")
+
+  @@map("subtasks")
+}
+
+model SubtaskTemplate {
+  id         String   @id @default(cuid())
+  taskType   String   // Changed from TaskType enum → String (supports custom task types)
+  title      String
+  orderIndex Int
+  isActive   Boolean  @default(true)
+  clientId   String?  // null = global default template; set = client-specific override
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  client     Client?  @relation("ClientSubtaskTemplates", fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("subtask_templates")
+}
+
+model VisitReassignment {
+  id              String   @id @default(cuid())
+  visitId         String
+  fromExecutiveId String
+  toExecutiveId   String
+  reason          String
+  reassignedById  String
+  createdAt       DateTime @default(now())
+
+  visit         Visit @relation(fields: [visitId], references: [id])
+  fromExecutive User  @relation("ReassignFrom", fields: [fromExecutiveId], references: [id])
+  toExecutive   User  @relation("ReassignTo", fields: [toExecutiveId], references: [id])
+  reassignedBy  User  @relation("ReassignedBy", fields: [reassignedById], references: [id])
+
+  @@map("visit_reassignments")
+}
+
+model ActivityLog {
+  id        String         @id @default(cuid())
+  visitId   String?
+  userId    String
+  action    ActivityAction
+  metadata  Json?
+  createdAt DateTime       @default(now())
+
+  visit Visit? @relation(fields: [visitId], references: [id])
+  user  User   @relation(fields: [userId], references: [id])
+
+  @@map("activity_logs")
+}
