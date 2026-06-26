@@ -110,6 +110,7 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
 
             const pct =
               total === 0 ? 0 : Math.round((completed / total) * 100);
+
             return (
               <div key={task.id} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
                 <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
