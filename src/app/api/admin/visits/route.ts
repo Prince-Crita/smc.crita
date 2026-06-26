@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
     ]);
 
     // Compute progress-based displayStatus for every visit using shared utility
-    const visitsWithProgress = allVisits.map((visit) => {
+    const visitsWithProgress = allVisits.map((visit: any) => {
       const { totalSubtasks, completedSubtasks, carryForwardCount, progress, displayStatus } =
         getSubtaskTotals(visit.tasks);
       return {
@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
     // Apply display-status filter in memory (after progress calculation)
     const visits =
       displayStatusFilter
-        ? visitsWithProgress.filter((v) => v.displayStatus === displayStatusFilter)
+        ? visitsWithProgress.filter((v: any) => v.displayStatus === displayStatusFilter)
         : visitsWithProgress;
 
     // Stats based on displayStatus (progress), NOT raw DB status

@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
       countMap.set(row.clientId, row._count.id);
     }
 
-    const result = clients.map((c) => ({
+    const result = clients.map((c: any) => ({
       ...c,
       clientSubtaskCount: countMap.get(c.id) ?? 0,   // client-specific templates
       globalSubtaskCount: countMap.get(null) ?? 0,    // global templates (shown as fallback)

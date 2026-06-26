@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
     });
 
     let totalCarryForward = 0;
-    const withProgress = allVisits.map((v) => {
+    const withProgress = allVisits.map((v: any) => {
       const { totalSubtasks, completedSubtasks, carryForwardCount, progress, displayStatus } =
         getSubtaskTotals(v.tasks);
 

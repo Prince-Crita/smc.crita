@@ -75,7 +75,7 @@ export async function POST(
       ...visitsToReassign.length > 0
         ? [
             prisma.visitReassignment.createMany({
-              data: visitsToReassign.map((v) => ({
+              data: visitsToReassign.map((v: any) => ({
                 visitId: v.id,
                 fromExecutiveId: v.executiveId,
                 toExecutiveId,
@@ -90,7 +90,7 @@ export async function POST(
     // Log activity for each reassigned visit
     if (visitsToReassign.length > 0) {
       await prisma.activityLog.createMany({
-        data: visitsToReassign.map((v) => ({
+        data: visitsToReassign.map((v: any) => ({
           visitId: v.id,
           userId: user.userId,
           action: "VISIT_REASSIGNED" as const,
