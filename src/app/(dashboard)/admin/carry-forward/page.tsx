@@ -72,7 +72,12 @@ export default async function CarryForwardPage() {
 
   const groups = await getCarryForwardData();
   const totalCarried = groups.reduce((s, g) => s + g.items.length, 0);
-  const completedCarried = groups.reduce((s, g) => s + g.items.filter((i: any) => i.isCompleted).length, 0);
+  const completedCarried = groups.reduce(
+  (s, g) =>
+    s +
+    g.items.filter((i: { isCompleted: boolean }) => i.isCompleted).length,
+  0
+);
 
   return (
     <div className="space-y-5">
