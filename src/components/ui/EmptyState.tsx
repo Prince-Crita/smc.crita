@@ -28,16 +28,16 @@ export function EmptyState({
         className
       )}
     >
-      {/* Icon circle */}
-      <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-slate-800 border border-slate-700 mb-5 shadow-inner">
-        <Icon className="w-8 h-8 text-slate-400" strokeWidth={1.5} />
+      {/* Icon square */}
+      <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-[#f1f4f9] border border-[#e2e7f0] mb-5">
+        <Icon className="w-8 h-8 text-[#c8d2e0]" strokeWidth={1.5} />
       </div>
 
       {/* Title */}
-      <h3 className="text-base font-semibold text-white mb-2">{title}</h3>
+      <h3 className="text-base font-semibold text-[#0f1829] mb-2">{title}</h3>
 
       {/* Description */}
-      <p className="text-sm text-slate-400 max-w-xs leading-relaxed mb-6">
+      <p className="text-sm text-[#8896a9] max-w-xs leading-relaxed mb-6">
         {description}
       </p>
 
@@ -45,7 +45,7 @@ export function EmptyState({
       {action && (
         <button
           onClick={action.onClick}
-          className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-4 py-2 text-sm font-medium transition-colors"
+          className="bg-[#25488e] hover:bg-[#1e3a72] text-white rounded-lg px-5 py-2.5 text-sm font-semibold transition-colors press-effect shadow-sm"
         >
           {action.label}
         </button>

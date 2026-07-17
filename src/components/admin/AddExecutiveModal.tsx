@@ -20,7 +20,7 @@ interface AddExecutiveModalProps {
 }
 
 const inputClass =
-  "bg-slate-800 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-blue-500/70 focus:ring-2 focus:ring-blue-500/20 text-sm w-full transition-all";
+  "bg-[#f8f9fc] border border-[#e2e7f0] rounded-lg px-3.5 py-2.5 text-[#0f1829] placeholder-[#8896a9] focus:outline-none focus:ring-2 focus:ring-[#25488e]/15 focus:border-[#25488e] text-sm w-full transition-all";
 
 export function AddExecutiveModal({ executive, onClose, onSuccess }: AddExecutiveModalProps) {
   const isEdit = !!executive;
@@ -96,23 +96,23 @@ export function AddExecutiveModal({ executive, onClose, onSuccess }: AddExecutiv
       size="md"
     >
       <form onSubmit={handleSubmit}>
-        {/* Fields — Modal's own overflow-y-auto handles scroll */}
+        {/* Fields */}
         <div className="p-5 space-y-4">
           {/* Name */}
           <div>
-            <label className="block text-xs text-slate-400 mb-1.5 font-semibold">Full Name *</label>
+            <label className="block text-sm font-semibold text-[#0f1829] mb-1.5">Full Name *</label>
             <input
               className={inputClass}
               placeholder="e.g. Alagarsamy"
               value={form.name}
               onChange={(e) => update("name", e.target.value)}
             />
-            {errors.name && <p className="text-red-400 text-xs mt-1">{errors.name}</p>}
+            {errors.name && <p className="text-red-600 text-xs mt-1">{errors.name}</p>}
           </div>
 
           {/* Email */}
           <div>
-            <label className="block text-xs text-slate-400 mb-1.5 font-semibold">Email Address *</label>
+            <label className="block text-sm font-semibold text-[#0f1829] mb-1.5">Email Address *</label>
             <input
               type="email"
               className={inputClass}
@@ -120,13 +120,13 @@ export function AddExecutiveModal({ executive, onClose, onSuccess }: AddExecutiv
               value={form.email}
               onChange={(e) => update("email", e.target.value)}
             />
-            {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email}</p>}
+            {errors.email && <p className="text-red-600 text-xs mt-1">{errors.email}</p>}
           </div>
 
           {/* Phone */}
           <div>
-            <label className="block text-xs text-slate-400 mb-1.5 font-semibold">
-              Phone <span className="text-slate-600 font-normal">(optional)</span>
+            <label className="block text-sm font-semibold text-[#0f1829] mb-1.5">
+              Phone <span className="text-[#8896a9] font-normal">(optional)</span>
             </label>
             <input
               className={inputClass}
@@ -138,10 +138,10 @@ export function AddExecutiveModal({ executive, onClose, onSuccess }: AddExecutiv
 
           {/* Password */}
           <div>
-            <label className="block text-xs text-slate-400 mb-1.5 font-semibold">
+            <label className="block text-sm font-semibold text-[#0f1829] mb-1.5">
               Password{" "}
               {isEdit ? (
-                <span className="text-slate-600 font-normal">(leave blank to keep current)</span>
+                <span className="text-[#8896a9] font-normal">(leave blank to keep current)</span>
               ) : (
                 "*"
               )}
@@ -157,26 +157,26 @@ export function AddExecutiveModal({ executive, onClose, onSuccess }: AddExecutiv
               <button
                 type="button"
                 onClick={() => setShowPassword((v) => !v)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors press-effect"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8896a9] hover:text-[#4a5568] transition-colors press-effect"
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
-            {errors.password && <p className="text-red-400 text-xs mt-1">{errors.password}</p>}
+            {errors.password && <p className="text-red-600 text-xs mt-1">{errors.password}</p>}
           </div>
 
           {/* Active toggle (edit only) */}
           {isEdit && (
-            <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-800/50 border border-slate-700/50">
+            <div className="flex items-center justify-between p-3.5 rounded-xl bg-[#f8f9fc] border border-[#e2e7f0]">
               <div>
-                <p className="text-sm text-white font-semibold">Account Status</p>
-                <p className="text-xs text-slate-500 mt-0.5">Inactive accounts cannot log in</p>
+                <p className="text-sm text-[#0f1829] font-semibold">Account Status</p>
+                <p className="text-xs text-[#8896a9] mt-0.5">Inactive accounts cannot log in</p>
               </div>
               <button
                 type="button"
                 onClick={() => update("isActive", !form.isActive)}
                 className={`relative w-11 h-6 rounded-full transition-colors press-effect ${
-                  form.isActive ? "bg-emerald-500" : "bg-slate-600"
+                  form.isActive ? "bg-green-500" : "bg-[#c8d2e0]"
                 }`}
               >
                 <span
@@ -189,19 +189,19 @@ export function AddExecutiveModal({ executive, onClose, onSuccess }: AddExecutiv
           )}
         </div>
 
-        {/* Footer — sticky so it stays visible when fields overflow */}
-        <div className="sticky bottom-0 bg-slate-900 px-5 py-4 border-t border-slate-800/80 flex gap-3">
+        {/* Footer */}
+        <div className="sticky bottom-0 bg-white px-5 py-4 border-t border-[#e2e7f0] flex gap-3">
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-medium transition-all press-effect"
+            className="flex-1 py-2.5 rounded-lg bg-[#f1f4f9] hover:bg-[#e2e7f0] text-[#4a5568] text-sm font-medium transition-all press-effect"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={loading}
-            className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-semibold transition-all press-effect"
+            className="flex-1 py-2.5 rounded-lg bg-[#25488e] hover:bg-[#1e3a72] disabled:opacity-50 text-white text-sm font-semibold transition-all press-effect"
           >
             {loading ? "Saving…" : isEdit ? "Save Changes" : "Add Executive"}
           </button>

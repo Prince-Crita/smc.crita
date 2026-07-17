@@ -31,9 +31,17 @@ export async function GET(request: NextRequest) {
         assignedExec: { select: { id: true, name: true, email: true } },
         // Use _count to get visitCount without loading visit rows
         _count: { select: { visits: true } },
-        // Fetch only the most recent visit date — take: 1 + select only scheduledDate
+        // Fetch only the most recent visit — date, status and its MD Meeting
+        // answer (used for the "Closed without MD Meeting" badge - P6)
         visits: {
-          select: { scheduledDate: true },
+          select: {
+            scheduledDate: true,
+            status: true,
+            tasks: {
+              where: { taskType: "MD_MEETING" },
+              select: { mdMeetingAnswer: true },
+            },
+          },
           orderBy: { scheduledDate: "desc" },
           take: 1,
         },
@@ -59,6 +67,18 @@ export async function GET(request: NextRequest) {
       createdAt: c.createdAt,
       visitCount: c._count.visits,          // from aggregate — no row loading
       recentVisitDate: c.visits[0]?.scheduledDate ?? null,
+      // P6: MD Meeting workflow status of the latest visit
+      //   "NO_MEETING" → latest visit CLOSED with MD answer NO
+      //   "PENDING"    → latest visit not closed and MD answer not given yet
+      //   null         → nothing to flag
+      mdMeetingStatus:
+        c.visits[0]?.tasks?.[0]
+          ? c.visits[0].status === "CLOSED" && c.visits[0].tasks[0].mdMeetingAnswer === "NO"
+            ? "NO_MEETING"
+            : c.visits[0].status !== "CLOSED" && !c.visits[0].tasks[0].mdMeetingAnswer
+            ? "PENDING"
+            : null
+          : null,
     }));
 
 

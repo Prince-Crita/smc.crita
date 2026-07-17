@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/middleware";
+import { syncAfterTemplateChange } from "@/lib/utils/create-visit";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getAuthUser(request);
@@ -25,6 +26,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       data: { userId: user.userId, action: "SUBTASK_TEMPLATE_UPDATED", metadata: { action: "updated", templateId: id, taskType: template.taskType } },
     });
 
+    // Propagate immediately to already-scheduled PENDING visits
+    await syncAfterTemplateChange(template.clientId);
+
     return NextResponse.json({ template });
   } catch (error) {
     console.error("Update template error:", error);
@@ -47,6 +51,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     await prisma.activityLog.create({
       data: { userId: user.userId, action: "SUBTASK_TEMPLATE_UPDATED", metadata: { action: "deleted", templateId: id, taskType: template.taskType, title: template.title } },
     });
+
+    // Propagate immediately to already-scheduled PENDING visits
+    await syncAfterTemplateChange(template.clientId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import toast from "react-hot-toast";
-import { Eye, EyeOff, Lock, Mail, Shield } from "lucide-react";
+import Image from "next/image";
+import { Eye, EyeOff, Lock, Mail } from "lucide-react";
 import { loginSchema, LoginInput } from "@/lib/validations/auth";
 
 export default function LoginForm() {
@@ -52,78 +53,116 @@ export default function LoginForm() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
-      {/* Background grid */}
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:4rem_4rem] opacity-30" />
+    <div className="min-h-screen bg-[#f8f9fc] flex">
+      {/* Left panel - brand */}
+      <div className="hidden lg:flex lg:w-[44%] xl:w-[48%] bg-[#172d58] flex-col items-center justify-center p-12 relative overflow-hidden">
+        {/* Decorative circles */}
+        <div className="absolute -top-24 -left-24 w-72 h-72 rounded-full bg-white/5" />
+        <div className="absolute -bottom-24 -right-24 w-96 h-96 rounded-full bg-white/5" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full bg-[#25488e]/40" />
 
-      {/* Glow effect */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-blue-600/10 rounded-full blur-3xl" />
+        <div className="relative z-10 max-w-sm text-center">
+          {/* Logo - soft white container behind it for contrast against the navy panel (desktop only) */}
+          <div className="inline-flex bg-white rounded-2xl shadow-sm px-6 py-4 mx-auto mb-8">
+            <Image
+              src="/logo.png"
+              alt="Shaabi Management Consultancy"
+              width={600}
+              height={200}
+              className="object-contain h-16 w-auto"
+              priority
+            />
+          </div>
+
+          <h1 className="text-3xl font-bold text-white mb-3">
+            Shaabi Management Consultancy
+          </h1>
+          <p className="text-white/60 text-base leading-relaxed">
+            Enterprise audit task management portal for field operations and compliance tracking.
+          </p>
+
+          {/* Feature pills */}
+          <div className="flex flex-wrap gap-2 justify-center mt-8">
+            {["Visit Tracking", "Task Management", "Carry Forward", "Reports"].map((f) => (
+              <span key={f} className="px-3 py-1 rounded-full bg-white/10 text-white/70 text-xs font-medium border border-white/10">
+                {f}
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
 
-      <div className="relative w-full max-w-md">
-        {/* Card */}
-        <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/50 rounded-2xl shadow-2xl overflow-hidden">
-          {/* Top accent bar */}
-          <div className="h-1 bg-gradient-to-r from-blue-500 via-blue-400 to-cyan-400" />
+      {/* Right panel - form */}
+      <div className="flex-1 flex items-center justify-center p-6 sm:p-10">
+        <div className="w-full max-w-md">
+          {/* Mobile logo */}
+          <div className="lg:hidden text-center mb-8">
+            <div className="flex justify-center mx-auto mb-4">
+              <Image
+                src="/logo.png"
+                alt="Shaabi Management Consultancy"
+                width={600}
+                height={200}
+                className="object-contain h-14 w-auto"
+                priority
+              />
+            </div>
+          </div>
 
-          <div className="p-8">
-            {/* Logo & Title */}
-            <div className="text-center mb-8">
-              <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-600/20 border border-blue-500/30 mb-4">
-                <Shield className="w-8 h-8 text-blue-400" />
-              </div>
-              <h1 className="text-2xl font-bold text-white tracking-tight">SMC Audit Portal</h1>
-              <p className="text-slate-400 text-sm mt-1">Task Management Module</p>
+          {/* Card */}
+          <div className="bg-white rounded-2xl border border-[#e2e7f0] shadow-xl p-8">
+            <div className="mb-8">
+              <h2 className="text-2xl font-bold text-[#0f1829]">Sign In</h2>
+              <p className="text-[#8896a9] text-sm mt-1">Enter your credentials to access the portal</p>
             </div>
 
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
               {/* Email */}
               <div>
-                <label htmlFor="email" className="block text-sm font-medium text-slate-300 mb-1.5">
+                <label htmlFor="email" className="block text-sm font-semibold text-[#4a5568] mb-1.5">
                   Email Address
                 </label>
                 <div className="relative">
-                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8896a9]" />
                   <input
                     id="email"
                     type="email"
                     autoComplete="email"
                     placeholder="name@smcaudit.com"
                     {...register("email")}
-                    className="w-full pl-10 pr-4 py-3 bg-slate-800/60 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all"
+                    className="w-full pl-10 pr-4 py-3 bg-[#f8f9fc] border border-[#e2e7f0] rounded-xl text-[#0f1829] placeholder-[#8896a9] text-sm focus:outline-none focus:ring-2 focus:ring-[#25488e]/30 focus:border-[#25488e] transition-all"
                   />
                 </div>
                 {errors.email && (
-                  <p className="mt-1.5 text-xs text-red-400">{errors.email.message}</p>
+                  <p className="mt-1.5 text-xs text-red-500">{errors.email.message}</p>
                 )}
               </div>
 
               {/* Password */}
               <div>
-                <label htmlFor="password" className="block text-sm font-medium text-slate-300 mb-1.5">
+                <label htmlFor="password" className="block text-sm font-semibold text-[#4a5568] mb-1.5">
                   Password
                 </label>
                 <div className="relative">
-                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8896a9]" />
                   <input
                     id="password"
                     type={showPassword ? "text" : "password"}
                     autoComplete="current-password"
                     placeholder="Enter your password"
                     {...register("password")}
-                    className="w-full pl-10 pr-11 py-3 bg-slate-800/60 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all"
+                    className="w-full pl-10 pr-11 py-3 bg-[#f8f9fc] border border-[#e2e7f0] rounded-xl text-[#0f1829] placeholder-[#8896a9] text-sm focus:outline-none focus:ring-2 focus:ring-[#25488e]/30 focus:border-[#25488e] transition-all"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#8896a9] hover:text-[#4a5568] transition-colors"
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
                 {errors.password && (
-                  <p className="mt-1.5 text-xs text-red-400">{errors.password.message}</p>
+                  <p className="mt-1.5 text-xs text-red-500">{errors.password.message}</p>
                 )}
               </div>
 
@@ -132,7 +171,7 @@ export default function LoginForm() {
                 type="submit"
                 disabled={isLoading}
                 id="login-btn"
-                className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 text-white font-semibold rounded-xl transition-all duration-200 flex items-center justify-center gap-2 mt-2 shadow-lg shadow-blue-500/20"
+                className="w-full py-3 px-4 bg-[#25488e] hover:bg-[#1e3a72] disabled:bg-[#25488e]/50 text-white font-semibold rounded-xl transition-all duration-200 flex items-center justify-center gap-2 mt-2 shadow-lg shadow-[#25488e]/20 press-effect"
               >
                 {isLoading ? (
                   <>
@@ -145,18 +184,18 @@ export default function LoginForm() {
               </button>
             </form>
 
-            {/* Hint */}
-            <div className="mt-6 p-3 bg-slate-800/40 rounded-xl border border-slate-700/50">
-              <p className="text-xs text-slate-500 text-center">
-                Default credentials: <span className="text-slate-400">Password@123</span>
+            {/* Default credentials hint */}
+            <div className="mt-6 p-3.5 bg-[#eef2f9] rounded-xl border border-[#adc2e2]">
+              <p className="text-xs text-[#4a5568] text-center">
+                Default password: <span className="font-semibold text-[#25488e]">Password@123</span>
               </p>
             </div>
           </div>
-        </div>
 
-        <p className="text-center text-xs text-slate-600 mt-6">
-          © 2026 SMC Audit Services. All rights reserved.
-        </p>
+          <p className="text-center text-xs text-[#8896a9] mt-6">
+            &copy; 2026 SMC Audit Services. All rights reserved.
+          </p>
+        </div>
       </div>
     </div>
   );

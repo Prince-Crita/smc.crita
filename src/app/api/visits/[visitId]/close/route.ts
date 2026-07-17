@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/db/prisma";
-import { validateVisitClose, executeCarryForward } from "@/lib/utils/carry-forward";
+import { validateVisitClose, executeCarryForward, hasEndDatePassed } from "@/lib/utils/carry-forward";
 import { generateVisitSummary, VisitData } from "@/lib/utils/summary";
 import { sendEmail } from "@/lib/email/mailer";
 import { generateVisitSummaryEmail } from "@/lib/email/templates/visit-summary";
@@ -49,8 +49,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: "Cannot close visit", validationErrors }, { status: 422 });
     }
 
-    // Execute carry-forward logic
-    const { carriedCount, nextVisitId } = await executeCarryForward(visit, user.userId);
+    // Carry-forward is generated ONLY after the visit's end date has passed
+    // (Business Rule - Case 1: end date not passed → no carry-forward yet).
+    // When the visit is closed early, the background sweep
+    // (processDueCarryForwards) picks up any remaining incomplete subtasks
+    // automatically once the end date passes. Closing late (window already
+    // over) carries immediately, same as before.
+    let carriedCount = 0;
+    let nextVisitId: string | null = null;
+    if (hasEndDatePassed(visit)) {
+      const result = await executeCarryForward(visit, user.userId);
+      carriedCount = result.carriedCount;
+      nextVisitId = result.nextVisitId;
+    }
 
     // Generate visit summary
     const summary = generateVisitSummary(visit as unknown as VisitData, carriedCount);

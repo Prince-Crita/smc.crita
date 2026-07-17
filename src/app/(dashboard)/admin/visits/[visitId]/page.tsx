@@ -6,6 +6,7 @@ import { formatDate, formatDateTime, getStatusColor, getProgressColor, getRating
 import { cn } from "@/lib/utils/utils";
 import Link from "next/link";
 import { ArrowLeft, Building2, CheckCircle2, XCircle, RotateCcw, FileText, User, Calendar, Clock } from "lucide-react";
+import { AutoRevalidate } from "@/components/ui/AutoRevalidate";
 
 export default async function AdminVisitDetailPage({ params }: { params: Promise<{ visitId: string }> }) {
   const cookieStore = await cookies();
@@ -50,6 +51,7 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
 
   return (
     <div className="space-y-5 max-w-4xl">
+      <AutoRevalidate />
       <Link href="/admin/visits" className="flex items-center gap-2 text-slate-500 hover:text-white text-sm transition-colors">
         <ArrowLeft className="w-4 h-4" />
         Back to All Visits
@@ -117,9 +119,9 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
                   <div className="flex items-center gap-2">
                     {pct === 100 ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <XCircle className="w-4 h-4 text-slate-600" />}
                     <p className="text-sm font-medium text-white">{task.title}</p>
-                    {task.taskType === "MD_MEETING" && task.mdMeetingAnswer && (
+                    {(task.taskType === "MD_MEETING" || task.taskType === "MR_MONTHLY_REPORT") && task.mdMeetingAnswer && (
                       <span className={cn("text-xs px-2 py-0.5 rounded-full border", task.mdMeetingAnswer === "YES" ? "text-emerald-400 bg-emerald-400/10 border-emerald-400/20" : "text-red-400 bg-red-400/10 border-red-400/20")}>
-                        MD: {task.mdMeetingAnswer}
+                        {task.taskType === "MD_MEETING" ? "MD" : "Completed"}: {task.mdMeetingAnswer}
                       </span>
                     )}
                   </div>

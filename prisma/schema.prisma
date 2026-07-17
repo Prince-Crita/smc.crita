@@ -68,6 +68,18 @@ enum ActivityAction {
   SUBTASK_TEMPLATE_UPDATED
 }
 
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum DelegationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
 model User {
   id           String   @id @default(cuid())
   name         String
@@ -85,9 +97,52 @@ model User {
   reassignmentsFrom  VisitReassignment[] @relation("ReassignFrom")
   reassignmentsTo    VisitReassignment[] @relation("ReassignTo")
   reassignmentsDone  VisitReassignment[] @relation("ReassignedBy")
+  attendance         Attendance[]        @relation("ExecutiveAttendance")
+  leaveRequests      LeaveRequest[]      @relation("ExecutiveLeaves")
+  leaveReviews       LeaveRequest[]      @relation("AdminLeaveReviews")
+  delegationsFrom    VisitDelegation[]   @relation("DelegationFrom")
+  delegationsTo      VisitDelegation[]   @relation("DelegationTo")
 
   @@map("users")
 }
+
+model Attendance {
+  id             String    @id @default(cuid())
+  executiveId    String
+  date           DateTime  // stored as midnight UTC for the day
+  punchIn        DateTime
+  punchOut       DateTime?
+  workingMinutes Int?
+  isLate         Boolean   @default(false)
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  executive User @relation("ExecutiveAttendance", fields: [executiveId], references: [id])
+
+  @@unique([executiveId, date])
+  @@map("attendance")
+}
+
+model LeaveRequest {
+  id           String      @id @default(cuid())
+  executiveId  String
+  date         DateTime    // the date leave is requested for
+  reason       String
+  status       LeaveStatus @default(PENDING)
+  adminComment String?
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  executive  User  @relation("ExecutiveLeaves",     fields: [executiveId],  references: [id])
+  reviewedBy User? @relation("AdminLeaveReviews",   fields: [reviewedById], references: [id])
+
+  @@unique([executiveId, date])
+  @@map("leave_requests")
+}
+
 
 model Client {
   id             String    @id @default(cuid())
@@ -108,8 +163,31 @@ model Client {
   visits            Visit[]
   assignedExec      User?              @relation("ClientAssignedExec", fields: [assignedExecId], references: [id])
   subtaskTemplates  SubtaskTemplate[]  @relation("ClientSubtaskTemplates")
+  taskTypeConfigs   ClientTaskType[]   @relation("ClientTaskTypes")
 
   @@map("clients")
+}
+
+// ─── Per-client MAIN task-type configuration ───────────────────────────────
+// Overrides for the 6 default task types (rename / soft-delete / reorder)
+// and registrations of admin-created custom main task types. A row here only
+// affects visits created AFTER the change — existing visits keep the tasks
+// they were created with, so historical data and carry-forward relationships
+// (which match by the stable `taskType` key) are never broken.
+model ClientTaskType {
+  id         String   @id @default(cuid())
+  clientId   String
+  taskType   String
+  title      String?  // null = keep the default title (renames set this)
+  orderIndex Int?     // null = keep the default position
+  isDeleted  Boolean  @default(false) // soft-hide a task type for future visits
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  client Client @relation("ClientTaskTypes", fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, taskType])
+  @@map("client_task_types")
 }
 
 model Visit {
@@ -119,6 +197,10 @@ model Visit {
   executiveId   String
   status        VisitStatus @default(PENDING)
   scheduledDate DateTime
+  // End of the visit's working window. Carry-forward is generated ONLY after
+  // this date has passed (see processDueCarryForwards). When null, the end
+  // of the scheduledDate's IST calendar day is used.
+  endDate       DateTime?
   openedAt      DateTime?
   closedAt      DateTime?
   summaryJson   Json?
@@ -131,6 +213,7 @@ model Visit {
   tasks         Task[]
   activityLogs  ActivityLog[]
   reassignments VisitReassignment[]
+  delegations   VisitDelegation[]
 
   @@map("visits")
 }
@@ -171,6 +254,12 @@ model Subtask {
   sourceSubtask   Subtask?  @relation("CarryForward", fields: [sourceSubtaskId], references: [id])
   carriedSubtasks Subtask[] @relation("CarryForward")
 
+  // A given source subtask can be carried into a given task at most once -
+  // DB-level guard against concurrent carry-forward sweeps racing past the
+  // in-memory idempotency check (serverless: one throttle per process).
+  // NULL sourceSubtaskId (normal subtasks) is unaffected - Postgres treats
+  // NULLs as distinct in unique indexes.
+  @@unique([taskId, sourceSubtaskId])
   @@map("subtasks")
 }
 
@@ -218,4 +307,27 @@ model ActivityLog {
   user  User   @relation(fields: [userId], references: [id])
 
   @@map("activity_logs")
+}
+
+// ─── Visit Delegation ─────────────────────────────────────────────────────────
+// Created when an executive wants leave but has a scheduled visit.
+// The target executive can ACCEPT (visit transfers + leave proceeds) or
+// REJECT (original exec is notified and can retry).
+model VisitDelegation {
+  id               String           @id @default(cuid())
+  visitId          String
+  fromExecutiveId  String           // the exec requesting leave
+  toExecutiveId    String           // the exec being asked to cover
+  status           DelegationStatus @default(PENDING)
+  rejectionReason  String?          // set by toExecutive on rejection
+  leaveDate        DateTime         // the date leave is requested for
+  leaveReason      String           // stored so leave can be auto-submitted on accept
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  visit         Visit @relation(fields: [visitId], references: [id])
+  fromExecutive User  @relation("DelegationFrom", fields: [fromExecutiveId], references: [id])
+  toExecutive   User  @relation("DelegationTo",   fields: [toExecutiveId],   references: [id])
+
+  @@map("visit_delegations")
 }

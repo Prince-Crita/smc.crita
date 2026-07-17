@@ -68,8 +68,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       )
     );
 
-    // Update MD Meeting answer if provided (and this is an MD_MEETING task)
-    if (task.taskType === "MD_MEETING" && mdMeetingAnswer) {
+    // Update the per-task YES/NO answer if provided. Two task types use it:
+    //   MD_MEETING        → "Was the MD meeting held?"
+    //   MR_MONTHLY_REPORT → "Completed?" (required before visit close)
+    if ((task.taskType === "MD_MEETING" || task.taskType === "MR_MONTHLY_REPORT") && mdMeetingAnswer) {
       await prisma.task.update({
         where: { id: taskId },
         data: { mdMeetingAnswer },

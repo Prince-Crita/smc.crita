@@ -14,10 +14,13 @@ export default function LoginPage() {
         position="top-right"
         toastOptions={{
           style: {
-            background: "#1e293b",
-            color: "#f1f5f9",
-            border: "1px solid #334155",
+            background: "#ffffff",
+            color: "#0f1829",
+            border: "1px solid #e2e7f0",
             borderRadius: "12px",
+            fontSize: "13px",
+            fontWeight: "500",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
           },
         }}
       />

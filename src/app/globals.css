@@ -1,14 +1,70 @@
 @import "tailwindcss";
 
+/* ─── Brand & Design System Tokens ──────────────────────────────────────── */
 @theme {
   --font-family-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --color-slate-950: #020617;
+
+  /* Primary Blue Palette */
+  --color-brand-blue-50:  #eef2f9;
+  --color-brand-blue-100: #d5e0f0;
+  --color-brand-blue-200: #adc2e2;
+  --color-brand-blue-300: #7a9dce;
+  --color-brand-blue-400: #4d79ba;
+  --color-brand-blue-500: #25488e;
+  --color-brand-blue-600: #1e3a72;
+  --color-brand-blue-700: #172d58;
+  --color-brand-blue-800: #101f3d;
+  --color-brand-blue-900: #081222;
+
+  /* Primary Maroon Palette */
+  --color-brand-maroon-50:  #fff0f6;
+  --color-brand-maroon-100: #ffd6e8;
+  --color-brand-maroon-200: #ffadd1;
+  --color-brand-maroon-300: #f075a8;
+  --color-brand-maroon-400: #cc1a6a;
+  --color-brand-maroon-500: #800040;
+  --color-brand-maroon-600: #660033;
+  --color-brand-maroon-700: #4d0026;
+  --color-brand-maroon-800: #33001a;
+  --color-brand-maroon-900: #1a000d;
+
+  /* Accent Orange Palette */
+  --color-brand-orange-50:  #fff7ef;
+  --color-brand-orange-100: #ffecd8;
+  --color-brand-orange-200: #ffd4ab;
+  --color-brand-orange-300: #ffb87a;
+  --color-brand-orange-400: #ff9a52;
+  --color-brand-orange-500: #ff944d;
+  --color-brand-orange-600: #e0722a;
+  --color-brand-orange-700: #b85616;
+  --color-brand-orange-800: #8a3d0c;
+  --color-brand-orange-900: #5c2605;
+
+  /* Neutral / UI */
+  --color-surface: #f8f9fc;
+  --color-surface-2: #f1f4f9;
+  --color-border: #e2e7f0;
+  --color-border-strong: #c8d2e0;
+  --color-text-primary: #0f1829;
+  --color-text-secondary: #4a5568;
+  --color-text-muted: #8896a9;
+  --color-white: #ffffff;
+
+  /* Status */
+  --color-success: #16a34a;
+  --color-success-bg: #f0fdf4;
+  --color-warning: #d97706;
+  --color-warning-bg: #fffbeb;
+  --color-danger: #dc2626;
+  --color-danger-bg: #fef2f2;
+  --color-info: #2563eb;
+  --color-info-bg: #eff6ff;
 }
 
 /* ─── Base Styles ────────────────────────────────────────────────────────── */
 @layer base {
   :root {
-    color-scheme: dark;
+    color-scheme: light;
   }
 
   * {
@@ -18,23 +74,19 @@
 
   html {
     scroll-behavior: smooth;
-    /* Prevent layout shift from scrollbar appearing */
     scrollbar-gutter: stable;
   }
 
   body {
-    background-color: #020617;
-    color: #f1f5f9;
-    /* Smoother font rendering on mobile */
+    background-color: #f8f9fc;
+    color: #0f1829;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    /* Prevent text size adjustment on iOS */
     -webkit-text-size-adjust: 100%;
-    /* Improve touch performance */
     touch-action: manipulation;
   }
 
-  /* Custom scrollbar — thin and subtle */
+  /* Custom scrollbar — thin, brand-colored */
   ::-webkit-scrollbar {
     width: 4px;
     height: 4px;
@@ -43,16 +95,16 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: #1e293b;
+    background: #c8d2e0;
     border-radius: 99px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #334155;
+    background: #8896a9;
   }
 
-  /* Better focus ring for accessibility */
+  /* Focus ring — brand blue */
   *:focus-visible {
-    outline: 2px solid #3b82f6;
+    outline: 2px solid #25488e;
     outline-offset: 2px;
     border-radius: 4px;
   }
@@ -89,11 +141,6 @@
   to   { transform: rotate(360deg); }
 }
 
-@keyframes pulse-subtle {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.5; }
-}
-
 @keyframes scaleIn {
   from { transform: scale(0.95); opacity: 0; }
   to   { transform: scale(1); opacity: 1; }
@@ -124,19 +171,19 @@
     animation: bounceIn 0.3s ease-out both;
   }
 
-  /* Stagger delays for list items */
+  /* Stagger delays */
   .stagger-1 { animation-delay: 0.05s; }
   .stagger-2 { animation-delay: 0.10s; }
   .stagger-3 { animation-delay: 0.15s; }
   .stagger-4 { animation-delay: 0.20s; }
 
-  /* Shimmer skeleton */
+  /* Skeleton shimmer — light theme */
   .skeleton-shimmer {
     background: linear-gradient(
       90deg,
-      #0f172a 0%,
-      #1e293b 50%,
-      #0f172a 100%
+      #e2e7f0 0%,
+      #f1f4f9 50%,
+      #e2e7f0 100%
     );
     background-size: 200% 100%;
     animation: shimmer 1.8s ease-in-out infinite;
@@ -151,13 +198,13 @@
     opacity: 0.85;
   }
 
-  /* Card hover lift */
+  /* Card hover lift — light theme */
   .card-hover {
     transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
   }
   .card-hover:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(37, 72, 142, 0.10);
   }
 
   /* Safe area padding for mobile (bottom nav) */
@@ -168,28 +215,29 @@
     padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
   }
 
-  /* Glass card */
-  .glass-card {
-    background: rgba(15, 23, 42, 0.7);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(51, 65, 85, 0.5);
+  /* Enterprise card — light */
+  .card {
+    background: #ffffff;
+    border: 1px solid #e2e7f0;
+    border-radius: 12px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+  }
+  .card-elevated {
+    background: #ffffff;
+    border: 1px solid #e2e7f0;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
   }
 
-  /* Gradient text */
-  .gradient-text {
-    background: linear-gradient(135deg, #60a5fa, #34d399);
+  /* Brand gradient text */
+  .gradient-text-brand {
+    background: linear-gradient(135deg, #25488e, #800040);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
 
-  /* Stat value glow */
-  .glow-blue { text-shadow: 0 0 20px rgba(59, 130, 246, 0.4); }
-  .glow-emerald { text-shadow: 0 0 20px rgba(16, 185, 129, 0.4); }
-  .glow-amber { text-shadow: 0 0 20px rgba(245, 158, 11, 0.4); }
-
-  /* No scrollbar (horizontal filter row) */
+  /* No scrollbar */
   .no-scrollbar {
     -ms-overflow-style: none;
     scrollbar-width: none;
@@ -210,5 +258,27 @@
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
+  }
+
+  /* Sidebar dark surface */
+  .sidebar-bg {
+    background: #172d58;
+  }
+
+  /* Progress bar colors */
+  .progress-brand {
+    background: linear-gradient(90deg, #25488e, #4d79ba);
+  }
+  .progress-maroon {
+    background: linear-gradient(90deg, #800040, #cc1a6a);
+  }
+  .progress-orange {
+    background: #ff944d;
+  }
+  .progress-success {
+    background: #16a34a;
+  }
+  .progress-warning {
+    background: #d97706;
   }
 }

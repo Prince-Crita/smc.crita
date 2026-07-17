@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
         assignedVisits: {
           select: {
             id: true,
+            scheduledDate: true,
             client: { select: { id: true, name: true } },
             tasks: {
               select: {
@@ -40,10 +41,13 @@ export async function GET(request: NextRequest) {
       orderBy: { name: "asc" },
     });
 
+    const now = new Date();
+
     const result = executives.map((exec: any) => {
       let pendingCount = 0;
       let inProgressCount = 0;
       let closedCount = 0;
+      let missedCount = 0;
       const clientMap = new Map<string, { id: string; name: string }>();
 
       for (const visit of exec.assignedVisits) {
@@ -61,6 +65,14 @@ export async function GET(request: NextRequest) {
         if (progress === 0) pendingCount++;
         else if (progress < 100) inProgressCount++;
         else closedCount++;
+
+        // Missed = overdue visit not yet closed
+        if (
+          new Date(visit.scheduledDate ?? Date.now()) < now &&
+          progress < 100
+        ) {
+          missedCount++;
+        }
       }
 
       return {
@@ -74,9 +86,11 @@ export async function GET(request: NextRequest) {
         pendingCount,
         inProgressCount,
         closedCount,
+        missedCount,
         assignedClients: Array.from(clientMap.values()),
       };
     });
+
 
     return NextResponse.json({ executives: result });
   } catch (error) {

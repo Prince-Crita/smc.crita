@@ -27,7 +27,7 @@ interface AddClientModalProps {
 }
 
 const inputClass =
-  "bg-slate-800 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-blue-500/70 focus:ring-2 focus:ring-blue-500/20 text-sm w-full transition-all";
+  "bg-[#f8f9fc] border border-[#e2e7f0] rounded-lg px-3.5 py-2.5 text-[#0f1829] placeholder-[#8896a9] focus:outline-none focus:ring-2 focus:ring-[#25488e]/20 focus:border-[#25488e] text-sm w-full transition-all";
 
 export function AddClientModal({ client, executives, onClose, onSuccess }: AddClientModalProps) {
   const isEdit = !!client;
@@ -136,17 +136,17 @@ export function AddClientModal({ client, executives, onClose, onSuccess }: AddCl
           {/* Row: Name + Code */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs text-slate-400 mb-1.5 font-semibold">Client Name *</label>
+              <label className="block text-xs text-[#4a5568] mb-1.5 font-semibold">Client Name *</label>
               <input
                 className={inputClass}
                 placeholder="e.g. Clifton Exports"
                 value={form.name}
                 onChange={(e) => update("name", e.target.value)}
               />
-              {errors.name && <p className="text-red-400 text-xs mt-1">{errors.name}</p>}
+              {errors.name && <p className="text-red-600 text-xs mt-1">{errors.name}</p>}
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1.5 font-semibold">Client Code *</label>
+              <label className="block text-xs text-[#4a5568] mb-1.5 font-semibold">Client Code *</label>
               <input
                 className={inputClass}
                 placeholder="e.g. CLIFF"
@@ -155,25 +155,25 @@ export function AddClientModal({ client, executives, onClose, onSuccess }: AddCl
                 disabled={isEdit}
                 style={isEdit ? { opacity: 0.5 } : {}}
               />
-              {errors.code && <p className="text-red-400 text-xs mt-1">{errors.code}</p>}
+              {errors.code && <p className="text-red-600 text-xs mt-1">{errors.code}</p>}
             </div>
           </div>
 
           {/* Contact Person */}
           <div>
-            <label className="block text-xs text-slate-400 mb-1.5 font-semibold">Contact Person *</label>
+            <label className="block text-xs text-[#4a5568] mb-1.5 font-semibold">Contact Person *</label>
             <input
               className={inputClass}
               placeholder="Primary contact name"
               value={form.contactPerson}
               onChange={(e) => update("contactPerson", e.target.value)}
             />
-            {errors.contactPerson && <p className="text-red-400 text-xs mt-1">{errors.contactPerson}</p>}
+            {errors.contactPerson && <p className="text-red-600 text-xs mt-1">{errors.contactPerson}</p>}
           </div>
 
           {/* Address */}
           <div>
-            <label className="block text-xs text-slate-400 mb-1.5 font-semibold">Address *</label>
+            <label className="block text-xs text-[#4a5568] mb-1.5 font-semibold">Address *</label>
             <textarea
               className={`${inputClass} resize-none`}
               rows={2}
@@ -181,14 +181,14 @@ export function AddClientModal({ client, executives, onClose, onSuccess }: AddCl
               value={form.address}
               onChange={(e) => update("address", e.target.value)}
             />
-            {errors.address && <p className="text-red-400 text-xs mt-1">{errors.address}</p>}
+            {errors.address && <p className="text-red-600 text-xs mt-1">{errors.address}</p>}
           </div>
 
           {/* Row: Phone + Email */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs text-slate-400 mb-1.5 font-semibold">
-                Phone <span className="text-slate-600 font-normal">(optional)</span>
+              <label className="block text-xs text-[#4a5568] mb-1.5 font-semibold">
+                Phone <span className="text-[#8896a9] font-normal">(optional)</span>
               </label>
               <input
                 className={inputClass}
@@ -198,8 +198,8 @@ export function AddClientModal({ client, executives, onClose, onSuccess }: AddCl
               />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1.5 font-semibold">
-                Client Email <span className="text-slate-600 font-normal">(optional)</span>
+              <label className="block text-xs text-[#4a5568] mb-1.5 font-semibold">
+                Client Email <span className="text-[#8896a9] font-normal">(optional)</span>
               </label>
               <input
                 type="email"
@@ -213,7 +213,7 @@ export function AddClientModal({ client, executives, onClose, onSuccess }: AddCl
 
           {/* Report recipient emails */}
           <div>
-            <label className="block text-xs text-slate-400 mb-1.5 font-semibold">
+            <label className="block text-xs text-[#4a5568] mb-1.5 font-semibold">
               Report Recipient Emails
             </label>
             <div className="flex gap-2">
@@ -227,7 +227,7 @@ export function AddClientModal({ client, executives, onClose, onSuccess }: AddCl
               <button
                 type="button"
                 onClick={addEmail}
-                className="px-3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white transition-all press-effect flex-shrink-0"
+                className="px-3 py-2.5 rounded-lg bg-[#25488e] hover:bg-[#1e3a72] active:bg-[#172d58] text-white transition-all press-effect flex-shrink-0"
               >
                 <Plus className="w-4 h-4" />
               </button>
@@ -237,13 +237,13 @@ export function AddClientModal({ client, executives, onClose, onSuccess }: AddCl
                 {reportEmails.map((em) => (
                   <span
                     key={em}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs"
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#eef2fb] border border-[#d4ddf5] text-[#25488e] text-xs"
                   >
                     <span className="truncate max-w-[160px]">{em}</span>
                     <button
                       type="button"
                       onClick={() => removeEmail(em)}
-                      className="flex-shrink-0 hover:text-red-400 transition-colors"
+                      className="flex-shrink-0 hover:text-red-600 transition-colors"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -255,7 +255,7 @@ export function AddClientModal({ client, executives, onClose, onSuccess }: AddCl
 
           {/* Assigned Executive */}
           <div>
-            <label className="block text-xs text-slate-400 mb-1.5 font-semibold">Assigned Executive</label>
+            <label className="block text-xs text-[#4a5568] mb-1.5 font-semibold">Assigned Executive</label>
             <select
               className={inputClass}
               value={form.assignedExecId}
@@ -271,7 +271,7 @@ export function AddClientModal({ client, executives, onClose, onSuccess }: AddCl
           {/* Row: Start Date + End Date */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs text-slate-400 mb-1.5 font-semibold">Start Date</label>
+              <label className="block text-xs text-[#4a5568] mb-1.5 font-semibold">Start Date</label>
               <input
                 type="date"
                 className={inputClass}
@@ -280,7 +280,7 @@ export function AddClientModal({ client, executives, onClose, onSuccess }: AddCl
               />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1.5 font-semibold">End Date</label>
+              <label className="block text-xs text-[#4a5568] mb-1.5 font-semibold">End Date</label>
               <input
                 type="date"
                 className={inputClass}
@@ -292,18 +292,18 @@ export function AddClientModal({ client, executives, onClose, onSuccess }: AddCl
         </div>
 
         {/* Sticky footer — always visible even when form scrolls */}
-        <div className="flex-shrink-0 px-5 py-4 border-t border-slate-800/80 flex gap-3 bg-slate-900">
+        <div className="flex-shrink-0 px-5 py-4 border-t border-[#e2e7f0] flex gap-3 bg-white">
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-medium transition-all press-effect"
+            className="flex-1 py-2.5 rounded-lg bg-[#f1f4f9] hover:bg-[#e2e7f0] text-[#4a5568] text-sm font-medium transition-all press-effect"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={loading}
-            className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-semibold transition-all press-effect"
+            className="flex-1 py-2.5 rounded-lg bg-[#25488e] hover:bg-[#1e3a72] disabled:opacity-50 text-white text-sm font-semibold transition-all press-effect"
           >
             {loading ? "Saving…" : isEdit ? "Save Changes" : "Add Client"}
           </button>

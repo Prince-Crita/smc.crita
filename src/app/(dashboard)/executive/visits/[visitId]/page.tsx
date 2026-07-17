@@ -5,10 +5,12 @@ import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import {
   ArrowLeft, CheckCircle2, Circle, RotateCcw, Clock,
-  ChevronDown, ChevronUp, Lock, XCircle, AlertCircle, X, TrendingUp,
+  ChevronDown, ChevronUp, Lock, XCircle, AlertCircle, TrendingUp,
   FileText, Calendar, User, CheckSquare, Save, RefreshCw, Info,
 } from "lucide-react";
 import { formatDate, formatDateTime, formatTimeAgo, getProgressColor, getRatingColor, cn } from "@/lib/utils/utils";
+import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
+import { Modal } from "@/components/ui/Modal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -45,6 +47,7 @@ interface Visit {
   visitNumber: string;
   status: string;
   scheduledDate: string;
+  endDate?: string | null;
   openedAt: string | null;
   closedAt: string | null;
   summaryJson: Record<string, unknown> | null;
@@ -78,9 +81,9 @@ const SubtaskItem = memo(function SubtaskItem({
     <div className={cn(
       "rounded-xl border transition-all duration-200",
       subtask.isCompleted
-        ? "bg-emerald-500/5 border-emerald-500/20"
-        : "bg-slate-800/40 border-slate-700/50",
-      subtask.isCarriedForward && !subtask.isCompleted && "border-orange-500/30 bg-orange-500/5"
+        ? "bg-green-50 border-green-200"
+        : "bg-white border-[#e2e7f0]",
+      subtask.isCarriedForward && !subtask.isCompleted && "border-orange-200 bg-orange-50"
     )}>
       <div className="flex items-start gap-3 p-3">
         <button
@@ -94,9 +97,9 @@ const SubtaskItem = memo(function SubtaskItem({
           aria-label={subtask.isCompleted ? "Mark incomplete" : "Mark complete"}
         >
           {subtask.isCompleted ? (
-            <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+            <CheckCircle2 className="w-5 h-5 text-green-500" />
           ) : (
-            <Circle className="w-5 h-5 text-slate-600" />
+            <Circle className="w-5 h-5 text-[#c8d2e0]" />
           )}
         </button>
 
@@ -105,13 +108,13 @@ const SubtaskItem = memo(function SubtaskItem({
             <p className={cn(
               "text-sm leading-snug",
               subtask.isCompleted
-                ? "text-emerald-300 line-through decoration-emerald-500/50"
-                : "text-white"
+                ? "text-green-700 line-through decoration-green-400/50"
+                : "text-[#0f1829]"
             )}>
               {subtask.title.replace("[CARRY-FORWARD] ", "")}
             </p>
             {subtask.isCarriedForward && (
-              <span className="flex items-center gap-1 text-xs text-orange-400 bg-orange-400/10 border border-orange-400/20 px-1.5 py-0.5 rounded-full flex-shrink-0">
+              <span className="flex items-center gap-1 text-xs text-orange-600 bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded-full flex-shrink-0">
                 <RotateCcw className="w-2.5 h-2.5" />
                 Carried
               </span>
@@ -125,13 +128,13 @@ const SubtaskItem = memo(function SubtaskItem({
                 placeholder="Reason for not completing (required before closing)"
                 value={subtask.incompletionReason || ""}
                 onChange={(e) => onReasonChange(subtask.id, e.target.value)}
-                className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-amber-500/50 focus:border-amber-500/50 transition-all"
+                className="w-full px-3 py-1.5 bg-[#f8f9fc] border border-[#e2e7f0] rounded-lg text-xs text-[#0f1829] placeholder-[#8896a9] focus:outline-none focus:ring-1 focus:ring-amber-500/50 focus:border-amber-400 transition-all"
               />
             </div>
           )}
 
           {showReasonDisplay && (
-            <p className="mt-1 text-xs text-amber-400/70 italic pl-0.5">
+            <p className="mt-1 text-xs text-amber-600 italic pl-0.5">
               Reason: {subtask.incompletionReason}
             </p>
           )}
@@ -174,6 +177,18 @@ const TaskCard = memo(function TaskCard({
   const totalCount = localSubtasks.length;
   const taskProgress = totalCount === 0 ? 0 : Math.round((completedCount / totalCount) * 100);
   const isMdMeeting = task.taskType === "MD_MEETING";
+  // MR Monthly Report has a REQUIRED "Completed" (Yes/No) answer, stored in
+  // the same per-task answer column as the MD Meeting confirmation. The visit
+  // cannot be closed until it is answered (enforced server-side too).
+  const isMrReport = task.taskType === "MR_MONTHLY_REPORT";
+  const needsAnswer = isMdMeeting || isMrReport;
+
+  // Derive a text-color class from completion progress — used in the count label
+  const statusColor =
+    taskProgress === 100 ? "text-green-600" :
+    taskProgress > 0    ? "text-[#25488e]"  :
+                          "text-[#8896a9]";
+
 
   const handleToggle = (id: string) => {
     setLocalSubtasks((prev) =>
@@ -200,9 +215,13 @@ const TaskCard = memo(function TaskCard({
   };
 
   const handleSave = async () => {
-    // Frontend guard: MD Meeting requires selection
+    // Frontend guard: MD Meeting / MR Monthly Report require a selection
     if (isMdMeeting && !mdAnswer) {
       toast.error("Please select YES or NO for MD Meeting before saving");
+      return;
+    }
+    if (isMrReport && !mdAnswer) {
+      toast.error("Please answer the \"Completed\" field (Yes/No) for MR Monthly Report before saving");
       return;
     }
 
@@ -224,60 +243,53 @@ const TaskCard = memo(function TaskCard({
     }
   };
 
-  const statusColor =
-    taskProgress === 100
-      ? "text-emerald-400"
-      : taskProgress > 0
-      ? "text-blue-400"
-      : "text-slate-500";
-
   return (
     <div className={cn(
-      "bg-slate-900 border rounded-2xl overflow-hidden transition-all duration-200",
+      "bg-white border rounded-xl overflow-hidden transition-all duration-200",
       taskProgress === 100
-        ? "border-emerald-500/30 shadow-sm shadow-emerald-500/5"
+        ? "border-green-200 shadow-sm"
         : isDirty
-        ? "border-amber-500/30"
-        : "border-slate-800"
+        ? "border-amber-300"
+        : "border-[#e2e7f0]"
     )}>
       {/* Task header */}
       <button
         type="button"
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-slate-800/40 transition-colors text-left"
+        className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-[#f8f9fc] transition-colors text-left"
       >
         <div className={cn(
           "w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 transition-all",
           taskProgress === 100
-            ? "bg-emerald-500/20 text-emerald-400"
+            ? "bg-green-100 text-green-600"
             : taskProgress > 0
-            ? "bg-blue-500/20 text-blue-400"
-            : "bg-slate-800 text-slate-500"
+            ? "bg-blue-50 text-[#25488e]"
+            : "bg-[#f1f4f9] text-[#8896a9]"
         )}>
           {taskProgress === 100 ? "✓" : task.orderIndex}
         </div>
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-sm font-semibold text-white">{task.title}</p>
+            <p className="text-sm font-semibold text-[#0f1829]">{task.title}</p>
             {isDirty && (
-              <span className="text-xs text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded-full border border-amber-400/20">
+              <span className="text-xs text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-200">
                 unsaved
               </span>
             )}
-            {isMdMeeting && mdAnswer && (
+            {needsAnswer && mdAnswer && (
               <span className={cn(
                 "text-xs px-2 py-0.5 rounded-full border",
                 mdAnswer === "YES"
-                  ? "text-emerald-400 bg-emerald-400/10 border-emerald-400/20"
-                  : "text-red-400 bg-red-400/10 border-red-400/20"
+                  ? "text-green-700 bg-green-50 border-green-200"
+                  : "text-red-700 bg-red-50 border-red-200"
               )}>
-                MD: {mdAnswer}
+                {isMdMeeting ? "MD" : "Completed"}: {mdAnswer}
               </span>
             )}
           </div>
           <div className="flex items-center gap-3 mt-1">
-            <div className="w-20 h-1 bg-slate-800 rounded-full">
+            <div className="w-20 h-1.5 bg-[#f1f4f9] rounded-full">
               <div
                 className={cn("h-full rounded-full transition-all duration-300", getProgressColor(taskProgress))}
                 style={{ width: `${taskProgress}%` }}
@@ -290,25 +302,25 @@ const TaskCard = memo(function TaskCard({
         </div>
 
         {isExpanded ? (
-          <ChevronUp className="w-4 h-4 text-slate-600 flex-shrink-0" />
+          <ChevronUp className="w-4 h-4 text-[#8896a9] flex-shrink-0" />
         ) : (
-          <ChevronDown className="w-4 h-4 text-slate-600 flex-shrink-0" />
+          <ChevronDown className="w-4 h-4 text-[#8896a9] flex-shrink-0" />
         )}
       </button>
 
       {/* Expanded content */}
       {isExpanded && (
-        <div className="px-4 pb-4 space-y-3 border-t border-slate-800/80 pt-3">
+        <div className="px-4 pb-4 space-y-3 border-t border-[#e2e7f0] pt-3">
           {task.description && (
-            <p className="text-xs text-slate-500 leading-relaxed">{task.description}</p>
+            <p className="text-xs text-[#8896a9] leading-relaxed">{task.description}</p>
           )}
 
-          {/* MD Meeting Answer */}
-          {isMdMeeting && isEditable && (
-            <div className="p-3 rounded-xl bg-blue-600/5 border border-blue-500/20">
-              <p className="text-xs font-semibold text-blue-300 mb-2 flex items-center gap-1.5">
+          {/* MD Meeting / MR Monthly Report required Yes-No answer */}
+          {needsAnswer && isEditable && (
+            <div className="p-3 rounded-xl bg-blue-50 border border-blue-200">
+              <p className="text-xs font-semibold text-[#25488e] mb-2 flex items-center gap-1.5">
                 <AlertCircle className="w-3.5 h-3.5" />
-                MD Meeting Confirmation (Required)
+                {isMdMeeting ? "MD Meeting Confirmation (Required)" : "Completed? (Required)"}
               </p>
               <div className="flex gap-2">
                 {(["YES", "NO"] as const).map((opt) => (
@@ -324,9 +336,9 @@ const TaskCard = memo(function TaskCard({
                       "flex-1 py-2 rounded-lg text-sm font-semibold border transition-all",
                       mdAnswer === opt
                         ? opt === "YES"
-                          ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                          : "bg-red-500/20 text-red-400 border-red-500/40"
-                        : "bg-slate-800 text-slate-500 border-slate-700 hover:border-slate-600 hover:text-slate-300"
+                          ? "bg-green-100 text-green-700 border-green-300"
+                          : "bg-red-100 text-red-700 border-red-300"
+                        : "bg-[#f8f9fc] text-[#8896a9] border-[#e2e7f0] hover:border-[#c8d2e0] hover:text-[#4a5568]"
                     )}
                   >
                     {opt === "YES" ? "✓ YES" : "✗ NO"}
@@ -336,16 +348,18 @@ const TaskCard = memo(function TaskCard({
             </div>
           )}
 
-          {isMdMeeting && !isEditable && task.mdMeetingAnswer && (
+          {needsAnswer && !isEditable && task.mdMeetingAnswer && (
             <div className={cn(
               "p-3 rounded-xl border",
               task.mdMeetingAnswer === "YES"
-                ? "bg-emerald-500/5 border-emerald-500/20"
-                : "bg-red-500/5 border-red-500/20"
+                ? "bg-green-50 border-green-200"
+                : "bg-red-50 border-red-200"
             )}>
-              <p className="text-xs text-slate-500">MD Meeting Result</p>
-              <p className={cn("text-sm font-bold mt-0.5", task.mdMeetingAnswer === "YES" ? "text-emerald-400" : "text-red-400")}>
-                {task.mdMeetingAnswer === "YES" ? "✓ Meeting Held" : "✗ Not Conducted"}
+              <p className="text-xs text-[#8896a9]">{isMdMeeting ? "MD Meeting Result" : "MR Monthly Report Completed"}</p>
+              <p className={cn("text-sm font-bold mt-0.5", task.mdMeetingAnswer === "YES" ? "text-green-700" : "text-red-700")}>
+                {isMdMeeting
+                  ? (task.mdMeetingAnswer === "YES" ? "✓ Meeting Held" : "✗ Not Conducted")
+                  : (task.mdMeetingAnswer === "YES" ? "✓ Yes" : "✗ No")}
               </p>
             </div>
           )}
@@ -365,9 +379,9 @@ const TaskCard = memo(function TaskCard({
 
           {/* Save error */}
           {saveError && (
-            <div className="flex items-start gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
-              <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-red-400">{saveError}</p>
+            <div className="flex items-start gap-2 p-3 rounded-xl bg-red-50 border border-red-200">
+              <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-red-600">{saveError}</p>
             </div>
           )}
 
@@ -377,7 +391,7 @@ const TaskCard = memo(function TaskCard({
               type="button"
               onClick={handleSave}
               disabled={isSaving}
-              className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:bg-blue-600/50 text-white text-sm font-semibold rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm"
+              className="w-full py-2.5 bg-[#25488e] hover:bg-[#1e3a72] active:bg-[#162d5c] disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm press-effect"
             >
               {isSaving ? (
                 <>
@@ -395,7 +409,7 @@ const TaskCard = memo(function TaskCard({
 
           {/* Saved state indicator */}
           {isEditable && !isDirty && completedCount > 0 && (
-            <p className="text-xs text-center text-emerald-400/70 flex items-center justify-center gap-1">
+            <p className="text-xs text-center text-green-600 flex items-center justify-center gap-1">
               <CheckCircle2 className="w-3 h-3" />
               Progress saved
             </p>
@@ -430,7 +444,7 @@ const ACTION_COLORS: Record<string, string> = {
 
 function ActivityTimeline({ logs }: { logs: ActivityLog[] }) {
   if (logs.length === 0) {
-    return <p className="text-sm text-slate-600 text-center py-4">No activity yet</p>;
+    return <p className="text-sm text-[#8896a9] text-center py-4">No activity yet</p>;
   }
 
   return (
@@ -440,13 +454,13 @@ function ActivityTimeline({ logs }: { logs: ActivityLog[] }) {
           <div className="flex flex-col items-center">
             <div className={cn(
               "w-2 h-2 rounded-full mt-1.5 flex-shrink-0",
-              ACTION_COLORS[log.action] || "bg-slate-600"
+              ACTION_COLORS[log.action] || "bg-[#c8d2e0]"
             )} />
-            {idx < logs.length - 1 && <div className="w-px flex-1 bg-slate-800 mt-1" />}
+            {idx < logs.length - 1 && <div className="w-px flex-1 bg-[#f1f4f9] mt-1" />}
           </div>
           <div className="pb-3 flex-1 min-w-0">
-            <p className="text-sm text-white">{ACTION_LABELS[log.action] || log.action}</p>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-sm text-[#0f1829]">{ACTION_LABELS[log.action] || log.action}</p>
+            <p className="text-xs text-[#8896a9] mt-0.5">
               {log.user.name} · {formatTimeAgo(log.createdAt)}
             </p>
             {log.action === "CARRY_FORWARD_APPLIED" && log.metadata?.carriedCount != null && (
@@ -492,53 +506,40 @@ function VisitSummaryModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-sm">
-      <div className="bg-slate-900 border border-slate-700 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-2xl max-h-[92vh] sm:max-h-[88vh] overflow-hidden flex flex-col shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 bg-gradient-to-r from-blue-600/10 to-transparent flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center">
-              <FileText className="w-4 h-4 text-blue-400" />
+    <Modal isOpen title="Visit Summary" onClose={onClose} size="lg" overlayClassName="pb-16 sm:pb-0">
+      <div className="p-5 space-y-5">
+          {/* Visit identity */}
+          <div className="flex items-center gap-3 -mt-1">
+            <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+              <FileText className="w-4 h-4 text-[#25488e]" />
             </div>
-            <div>
-              <p className="text-base font-bold text-white">Visit Summary</p>
-              <p className="text-xs text-slate-500">{s.visitNumber} · {s.clientName}</p>
-            </div>
+            <p className="text-xs text-[#8896a9]">{s.visitNumber} · {s.clientName}</p>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-lg hover:bg-slate-800 text-slate-500 hover:text-white transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
 
-        {/* Body */}
-        <div className="overflow-y-auto flex-1 p-5 space-y-5">
           {/* Score row */}
-          <div className="flex items-center justify-between p-4 bg-slate-800/50 rounded-xl border border-slate-700">
+          <div className="flex items-center justify-between p-4 bg-[#f8f9fc] rounded-xl border border-[#e2e7f0]">
             <div>
-              <p className="text-xs text-slate-500">Overall Rating</p>
+              <p className="text-xs text-[#8896a9]">Overall Rating</p>
               <p className={cn("text-2xl font-bold mt-0.5", getRatingColor(s.overallRating))}>
                 {s.overallRating}
               </p>
             </div>
             <div className="text-right">
-              <p className="text-xs text-slate-500">Completion</p>
-              <p className="text-2xl font-bold text-white mt-0.5">{s.completionPercentage}%</p>
+              <p className="text-xs text-[#8896a9]">Completion</p>
+              <p className="text-2xl font-bold text-[#0f1829] mt-0.5">{s.completionPercentage}%</p>
             </div>
           </div>
 
           {/* Stats grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { label: "Tasks Done", value: `${s.completedTasks}/${s.totalTasks}`, color: "text-white" },
-              { label: "MD Meeting", value: s.mdMeetingAnswer || "N/A", color: s.mdMeetingHeld ? "text-emerald-400" : "text-red-400" },
-              { label: "Carry-Fwd", value: s.carryForwardCount, color: s.carryForwardCount > 0 ? "text-orange-400" : "text-emerald-400" },
-              { label: "Duration", value: s.duration, color: "text-blue-400" },
+              { label: "Tasks Done", value: `${s.completedTasks}/${s.totalTasks}`, color: "text-[#0f1829]" },
+              { label: "MD Meeting", value: s.mdMeetingAnswer || "N/A", color: s.mdMeetingHeld ? "text-green-600" : "text-red-600" },
+              { label: "Carry-Fwd", value: s.carryForwardCount, color: s.carryForwardCount > 0 ? "text-orange-600" : "text-green-600" },
+              { label: "Duration", value: s.duration, color: "text-[#25488e]" },
             ].map((item) => (
-              <div key={item.label} className="p-3 bg-slate-800/40 rounded-xl text-center border border-slate-700/50">
-                <p className="text-xs text-slate-500 mb-1">{item.label}</p>
+              <div key={item.label} className="p-3 bg-[#f8f9fc] rounded-xl text-center border border-[#e2e7f0]">
+                <p className="text-xs text-[#8896a9] mb-1">{item.label}</p>
                 <p className={cn("text-lg font-bold", item.color)}>{String(item.value)}</p>
               </div>
             ))}
@@ -546,19 +547,19 @@ function VisitSummaryModal({
 
           {/* Task breakdown */}
           <div>
-            <p className="text-sm font-semibold text-white mb-3">Task Breakdown</p>
+            <p className="text-sm font-semibold text-[#0f1829] mb-3">Task Breakdown</p>
             <div className="space-y-2">
               {s.taskBreakdown?.map((task) => {
                 const pct = task.totalSubtasks === 0
                   ? 0
                   : Math.round((task.completedSubtasks / task.totalSubtasks) * 100);
                 return (
-                  <div key={task.title} className="p-3 rounded-xl bg-slate-800/40 border border-slate-700/50">
+                  <div key={task.title} className="p-3 rounded-xl bg-[#f8f9fc] border border-[#e2e7f0]">
                     <div className="flex items-center justify-between mb-1.5">
-                      <p className="text-sm text-white">{task.title}</p>
-                      <span className="text-xs text-slate-400">{task.completedSubtasks}/{task.totalSubtasks}</span>
+                      <p className="text-sm text-[#0f1829]">{task.title}</p>
+                      <span className="text-xs text-[#8896a9]">{task.completedSubtasks}/{task.totalSubtasks}</span>
                     </div>
-                    <div className="h-1.5 bg-slate-700 rounded-full">
+                    <div className="h-1.5 bg-[#f1f4f9] rounded-full">
                       <div
                         className={cn("h-full rounded-full", getProgressColor(pct))}
                         style={{ width: `${pct}%` }}
@@ -567,7 +568,7 @@ function VisitSummaryModal({
                     {task.incompleteItems?.length > 0 && (
                       <div className="mt-2 space-y-1">
                         {task.incompleteItems.map((item, i) => (
-                          <p key={i} className="text-xs text-amber-400/80">• {item.title}: {item.reason}</p>
+                          <p key={i} className="text-xs text-amber-600">• {item.title}: {item.reason}</p>
                         ))}
                       </div>
                     )}
@@ -580,20 +581,19 @@ function VisitSummaryModal({
           {/* Key findings */}
           {s.keyFindings?.length > 0 && (
             <div>
-              <p className="text-sm font-semibold text-white mb-3">Key Findings</p>
+              <p className="text-sm font-semibold text-[#0f1829] mb-3">Key Findings</p>
               <div className="space-y-2">
                 {s.keyFindings.map((finding, i) => (
-                  <div key={i} className="flex items-start gap-2 text-sm text-slate-300">
-                    <span className="text-blue-400 mt-0.5 flex-shrink-0">›</span>
+                  <div key={i} className="flex items-start gap-2 text-sm text-[#4a5568]">
+                    <span className="text-[#25488e] mt-0.5 flex-shrink-0">›</span>
                     <p>{finding}</p>
                   </div>
                 ))}
               </div>
             </div>
           )}
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -615,87 +615,72 @@ function CloseVisitModal({
   onConfirm: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-sm">
-      <div className="bg-slate-900 border border-slate-700 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md shadow-2xl">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
-          <div className="flex items-center gap-2">
-            <Lock className="w-4 h-4 text-emerald-400" />
-            <p className="font-semibold text-white">Close Visit</p>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-500 hover:text-white transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
+    <Modal isOpen title="Close Visit" onClose={onClose} size="sm" overlayClassName="pb-16 sm:pb-0">
         <div className="p-5 space-y-4">
           {validationErrors.length > 0 && (
-            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl space-y-1.5">
-              <p className="text-xs font-semibold text-red-400 mb-1 flex items-center gap-1.5">
+            <div className="p-3 bg-red-50 border border-red-200 rounded-xl space-y-1.5">
+              <p className="text-xs font-semibold text-red-600 mb-1 flex items-center gap-1.5">
                 <AlertCircle className="w-3.5 h-3.5" />
                 Please resolve before closing
               </p>
               {validationErrors.map((err, i) => (
-                <p key={i} className="text-xs text-red-400/80">• {err}</p>
+                <p key={i} className="text-xs text-red-500">• {err}</p>
               ))}
             </div>
           )}
 
           {validationErrors.length === 0 && (
-            <div className="flex items-start gap-2 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-slate-300">
+            <div className="flex items-start gap-2 p-3 rounded-xl bg-green-50 border border-green-200">
+              <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-[#4a5568]">
                 All checks passed. This will close the visit, carry forward any incomplete items, and email a summary.
               </p>
             </div>
           )}
 
           <div>
-            <label className="text-xs text-slate-500 mb-1.5 block font-medium">
-              Additional Notes <span className="text-slate-600">(optional)</span>
+            <label className="text-xs text-[#8896a9] mb-1.5 block font-medium">
+              Additional Notes <span className="text-[#c8d2e0]">(optional)</span>
             </label>
             <textarea
               value={closeNotes}
               onChange={(e) => onNotesChange(e.target.value)}
               placeholder="Final observations or remarks..."
               rows={3}
-              className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500/50 resize-none transition-all"
+              className="w-full px-3 py-2.5 bg-[#f8f9fc] border border-[#e2e7f0] rounded-xl text-sm text-[#0f1829] placeholder-[#8896a9] focus:outline-none focus:ring-2 focus:ring-[#800040]/20 focus:border-[#800040] resize-none transition-all"
             />
           </div>
-
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-sm font-medium rounded-xl transition-all"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={onConfirm}
-              disabled={isClosing || validationErrors.length > 0}
-              id="confirm-close-btn"
-              className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-all flex items-center justify-center gap-2"
-            >
-              {isClosing ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Closing...
-                </>
-              ) : (
-                <>
-                  <Lock className="w-3.5 h-3.5" />
-                  Confirm Close
-                </>
-              )}
-            </button>
-          </div>
         </div>
-      </div>
-    </div>
+
+        <div className="sticky bottom-0 bg-white px-5 py-4 border-t border-[#e2e7f0] flex gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 py-2.5 bg-[#f1f4f9] hover:bg-[#e2e7f0] border border-[#e2e7f0] text-[#4a5568] text-sm font-semibold rounded-xl transition-all"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={isClosing || validationErrors.length > 0}
+            id="confirm-close-btn"
+            className="flex-1 py-2.5 bg-[#800040] hover:bg-[#660033] disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-all flex items-center justify-center gap-2"
+          >
+            {isClosing ? (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Closing...
+              </>
+            ) : (
+              <>
+                <Lock className="w-3.5 h-3.5" />
+                Confirm Close
+              </>
+            )}
+          </button>
+        </div>
+    </Modal>
   );
 }
 
@@ -706,35 +691,33 @@ export default function VisitDetailPage() {
   const router = useRouter();
   const visitId = params.visitId as string;
 
-  const [visit, setVisit] = useState<Visit | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
   const [isOpening, setIsOpening] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
   const [closeNotes, setCloseNotes] = useState("");
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
-  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const fetchVisit = useCallback(async (silent = false) => {
-    if (!silent) setIsLoading(true);
-    else setIsRefreshing(true);
-    try {
-      const res = await fetch(`/api/visits/${visitId}`);
-      if (!res.ok) throw new Error("Failed");
-      const data = await res.json();
-      setVisit(data.visit);
-    } catch {
-      if (!silent) toast.error("Failed to load visit");
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-    }
+  const fetchVisitData = useCallback(async () => {
+    const data = await fetchJSON<{ visit: Visit }>(`/api/visits/${visitId}`);
+    return data.visit as Visit;
   }, [visitId]);
 
+  // Fetch on mount + silently on focus/visibility (event-driven, no polling)
+  // so admin task-config changes reach the CURRENT visit without a reload.
+  // TaskCard preserves dirty local edits (isDirty guard), so in-progress
+  // work is never overwritten by a background refetch.
+  const { data: visit, loading: isLoading, error, refresh: fetchVisit, setData: setVisit } = useLiveQuery(fetchVisitData, {
+    revalidateOnFocus: true,
+    revalidateOnVisible: true,
+  });
+  // Background refresh indicator — only meaningful once we already have data;
+  // the very first fetch is covered by the full-page skeleton below instead.
+  const isRefreshing = isLoading && !!visit;
+
   useEffect(() => {
-    fetchVisit();
-  }, [fetchVisit]);
+    if (error) toast.error("Failed to load visit");
+  }, [error]);
 
   const handleOpenVisit = async () => {
     setIsOpening(true);
@@ -745,7 +728,7 @@ export default function VisitDetailPage() {
         throw new Error(d.error || "Failed");
       }
       toast.success("Visit opened!");
-      await fetchVisit(true);
+      await fetchVisit();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to open visit");
     } finally {
@@ -822,7 +805,7 @@ export default function VisitDetailPage() {
 
       toast.success("Visit closed successfully!");
       setShowCloseConfirm(false);
-      await fetchVisit(true);
+      await fetchVisit();
       setShowSummary(true);
     } catch {
       toast.error("An unexpected error occurred");
@@ -833,19 +816,19 @@ export default function VisitDetailPage() {
 
   // ─── Loading / error states ───────────────────────────────────────────────
 
-  if (isLoading) {
+  if (isLoading && !visit) {
     return (
       <div className="space-y-4 max-w-4xl">
-        <div className="h-8 w-32 bg-slate-800 animate-pulse rounded-lg" />
-        <div className="h-40 bg-slate-900 border border-slate-800 animate-pulse rounded-2xl" />
-        <div className="h-16 bg-slate-900 border border-slate-800 animate-pulse rounded-2xl" />
+        <div className="h-8 w-32 bg-[#e2e7f0] animate-pulse rounded-lg" />
+        <div className="h-40 bg-white border border-[#e2e7f0] animate-pulse rounded-xl" />
+        <div className="h-16 bg-white border border-[#e2e7f0] animate-pulse rounded-xl" />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 space-y-3">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-14 bg-slate-900 border border-slate-800 animate-pulse rounded-2xl" />
+              <div key={i} className="h-14 bg-white border border-[#e2e7f0] animate-pulse rounded-xl" />
             ))}
           </div>
-          <div className="h-40 bg-slate-900 border border-slate-800 animate-pulse rounded-2xl" />
+          <div className="h-40 bg-white border border-[#e2e7f0] animate-pulse rounded-xl" />
         </div>
       </div>
     );
@@ -853,10 +836,10 @@ export default function VisitDetailPage() {
 
   if (!visit) {
     return (
-      <div className="text-center py-16 text-slate-500">
+      <div className="text-center py-16 text-[#8896a9]">
         <XCircle className="w-10 h-10 mx-auto mb-3 opacity-40" />
-        <p className="font-medium">Visit not found</p>
-        <button onClick={() => router.push("/executive/visits")} className="mt-3 text-sm text-blue-400 hover:underline">
+        <p className="font-medium text-[#4a5568]">Visit not found</p>
+        <button onClick={() => router.push("/executive/visits")} className="mt-3 text-sm text-[#25488e] hover:underline">
           ← Back to Visits
         </button>
       </div>
@@ -871,36 +854,36 @@ export default function VisitDetailPage() {
       <button
         type="button"
         onClick={() => router.push("/executive/visits")}
-        className="flex items-center gap-2 text-slate-500 hover:text-white text-sm transition-colors group"
+        className="flex items-center gap-2 text-[#25488e] hover:text-[#1e3a72] text-sm font-semibold transition-colors group"
       >
         <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
         Back to Visits
       </button>
 
       {/* ── Visit header card ──────────────────────────────────────── */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+      <div className="bg-white border border-[#e2e7f0] rounded-xl p-5 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-start gap-4">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
-              <span className="text-xs font-mono text-slate-500">{visit.visitNumber}</span>
+              <span className="text-xs font-mono text-[#25488e] bg-[#eef2fb] px-2 py-0.5 rounded-md border border-[#d4ddf5]">{visit.visitNumber}</span>
               <span className={cn(
-                "px-2 py-0.5 rounded-full text-xs font-medium border",
+                "px-2 py-0.5 rounded-full text-xs font-semibold border",
                 visit.status === "OPEN"
-                  ? "text-blue-400 bg-blue-400/10 border-blue-400/20"
+                  ? "text-blue-700 bg-blue-50 border-blue-200"
                   : visit.status === "CLOSED"
-                  ? "text-emerald-400 bg-emerald-400/10 border-emerald-400/20"
-                  : "text-amber-400 bg-amber-400/10 border-amber-400/20"
+                  ? "text-green-700 bg-green-50 border-green-200"
+                  : "text-amber-700 bg-amber-50 border-amber-200"
               )}>
                 {visit.status === "OPEN" ? "In Progress" : visit.status === "PENDING" ? "Pending" : "Closed"}
               </span>
               {isRefreshing && (
-                <RefreshCw className="w-3.5 h-3.5 text-slate-600 animate-spin" />
+                <RefreshCw className="w-3.5 h-3.5 text-[#8896a9] animate-spin" />
               )}
             </div>
-            <h1 className="text-xl font-bold text-white">{visit.client.name}</h1>
-            <p className="text-sm text-slate-400 mt-0.5">{visit.client.contactPerson} · {visit.client.address}</p>
+            <h1 className="text-xl font-bold text-[#0f1829]">{visit.client.name}</h1>
+            <p className="text-sm text-[#4a5568] mt-0.5">{visit.client.contactPerson} · {visit.client.address}</p>
             {visit.client.phone && (
-              <p className="text-xs text-slate-500 mt-0.5">{visit.client.phone}</p>
+              <p className="text-xs text-[#8896a9] mt-0.5">{visit.client.phone}</p>
             )}
           </div>
 
@@ -911,7 +894,7 @@ export default function VisitDetailPage() {
                 onClick={handleOpenVisit}
                 disabled={isOpening}
                 id="open-visit-btn"
-                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-60 text-white text-sm font-semibold rounded-xl transition-all flex items-center gap-2 shadow-sm"
+                className="px-4 py-2.5 bg-[#25488e] hover:bg-[#1e3a72] active:bg-[#162d5c] disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-all flex items-center gap-2 shadow-sm press-effect"
               >
                 {isOpening ? (
                   <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -930,7 +913,7 @@ export default function VisitDetailPage() {
                   setShowCloseConfirm(true);
                 }}
                 id="close-visit-btn"
-                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-sm font-semibold rounded-xl transition-all flex items-center gap-2 shadow-sm"
+                className="px-4 py-2.5 bg-[#800040] hover:bg-[#660033] active:bg-[#4d0030] text-white text-sm font-semibold rounded-lg transition-all flex items-center gap-2 shadow-sm press-effect"
               >
                 <Lock className="w-4 h-4" />
                 Close Visit
@@ -941,7 +924,7 @@ export default function VisitDetailPage() {
               <button
                 type="button"
                 onClick={() => setShowSummary(true)}
-                className="px-4 py-2.5 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-400 text-sm font-semibold rounded-xl transition-all flex items-center gap-2"
+                className="px-4 py-2.5 bg-[#f1f4f9] hover:bg-[#e2e7f0] border border-[#e2e7f0] text-[#4a5568] text-sm font-semibold rounded-lg transition-all flex items-center gap-2"
               >
                 <FileText className="w-4 h-4" />
                 View Summary
@@ -951,50 +934,54 @@ export default function VisitDetailPage() {
         </div>
 
         {/* Meta row */}
-        <div className="flex flex-wrap gap-4 mt-4 pt-4 border-t border-slate-800 text-xs text-slate-500">
+        <div className="flex flex-wrap gap-4 mt-4 pt-4 border-t border-[#e2e7f0] text-xs text-[#8896a9]">
           <div className="flex items-center gap-1.5">
             <Calendar className="w-3.5 h-3.5" />
-            Scheduled: <span className="text-slate-300 ml-0.5">{formatDate(visit.scheduledDate)}</span>
+            Start: <span className="text-[#4a5568] ml-0.5">{formatDate(visit.scheduledDate)}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Calendar className="w-3.5 h-3.5" />
+            End: <span className="text-[#4a5568] ml-0.5">{formatDate(visit.endDate ?? visit.scheduledDate)}</span>
           </div>
           {visit.openedAt && (
             <div className="flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5" />
-              Opened: <span className="text-slate-300 ml-0.5">{formatDateTime(visit.openedAt)}</span>
+              Opened: <span className="text-[#4a5568] ml-0.5">{formatDateTime(visit.openedAt)}</span>
             </div>
           )}
           {visit.closedAt && (
             <div className="flex items-center gap-1.5">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-              Closed: <span className="text-emerald-400 ml-0.5">{formatDateTime(visit.closedAt)}</span>
+              <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
+              Closed: <span className="text-green-700 ml-0.5">{formatDateTime(visit.closedAt)}</span>
             </div>
           )}
           <div className="flex items-center gap-1.5">
             <User className="w-3.5 h-3.5" />
-            <span className="text-slate-300">{visit.executive.name}</span>
+            <span className="text-[#4a5568]">{visit.executive.name}</span>
           </div>
         </div>
       </div>
 
       {/* ── Progress tracker ───────────────────────────────────────── */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+      <div className="bg-white border border-[#e2e7f0] rounded-xl p-5 shadow-sm">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-            <TrendingUp className="w-4 h-4 text-blue-400" />
+          <h2 className="text-sm font-semibold text-[#0f1829] flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-[#25488e]" />
             Overall Progress
           </h2>
-          <span className="text-2xl font-bold text-white">{visit.progress}%</span>
+          <span className="text-2xl font-bold text-[#0f1829]">{visit.progress}%</span>
         </div>
-        <div className="h-3 bg-slate-800 rounded-full overflow-hidden">
+        <div className="h-3 bg-[#f1f4f9] rounded-full overflow-hidden">
           <div
             className={cn("h-full rounded-full transition-all duration-500", getProgressColor(visit.progress))}
             style={{ width: `${visit.progress}%` }}
           />
         </div>
-        <div className="flex items-center justify-between mt-2 text-xs text-slate-500">
+        <div className="flex items-center justify-between mt-2 text-xs text-[#8896a9]">
           <span>{visit.completedSubtasks} of {visit.totalSubtasks} subtasks</span>
           <span className={cn(
             "font-medium",
-            visit.progress === 100 ? "text-emerald-400" : visit.progress >= 50 ? "text-blue-400" : "text-amber-400"
+            visit.progress === 100 ? "text-green-600" : visit.progress >= 50 ? "text-[#25488e]" : "text-amber-600"
           )}>
             {visit.progress === 100 ? "✓ All complete" : visit.progress >= 50 ? "Halfway there" : "In progress"}
           </span>
@@ -1011,10 +998,10 @@ export default function VisitDetailPage() {
                 <div className={cn(
                   "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all",
                   pct === 100
-                    ? "bg-emerald-500/20 border-emerald-500 text-emerald-400"
+                    ? "bg-green-100 border-green-500 text-green-700"
                     : pct > 0
-                    ? "bg-blue-500/20 border-blue-500 text-blue-400"
-                    : "bg-slate-800 border-slate-700 text-slate-600"
+                    ? "bg-blue-50 border-[#25488e] text-[#25488e]"
+                    : "bg-[#f1f4f9] border-[#e2e7f0] text-[#8896a9]"
                 )}>
                   {pct === 100 ? "✓" : task.orderIndex}
                 </div>
@@ -1034,10 +1021,10 @@ export default function VisitDetailPage() {
         ).length;
         if (noReason === 0 && incomplete > 0) return null;
         if (noReason > 0) return (
-          <div className="flex items-start gap-2 p-3.5 rounded-2xl bg-amber-500/5 border border-amber-500/20">
-            <Info className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-amber-400/90">
-              <span className="font-medium">{noReason} subtask{noReason > 1 ? "s" : ""}</span> need a reason before you can close the visit.
+          <div className="flex items-start gap-2 p-3.5 rounded-xl bg-amber-50 border border-amber-200">
+            <Info className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-amber-700">
+              <span className="font-semibold">{noReason} subtask{noReason > 1 ? "s" : ""}</span> need a reason before you can close the visit.
             </p>
           </div>
         );
@@ -1048,8 +1035,8 @@ export default function VisitDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Tasks column */}
         <div className="lg:col-span-2 space-y-3">
-          <h2 className="text-base font-semibold text-white">
-            Tasks <span className="text-slate-600 font-normal text-sm">({visit.tasks.length})</span>
+          <h2 className="text-base font-semibold text-[#0f1829]">
+            Tasks <span className="text-[#8896a9] font-normal text-sm">({visit.tasks.length})</span>
           </h2>
           {visit.tasks.map((task) => (
             <TaskCard
@@ -1063,8 +1050,8 @@ export default function VisitDetailPage() {
 
         {/* Activity sidebar */}
         <div className="space-y-3">
-          <h2 className="text-base font-semibold text-white">Activity</h2>
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <h2 className="text-base font-semibold text-[#0f1829]">Activity</h2>
+          <div className="bg-white border border-[#e2e7f0] rounded-xl p-4 shadow-sm">
             <ActivityTimeline logs={visit.activityLogs} />
           </div>
         </div>

@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/db/prisma";
 import { getSubtaskTotals } from "@/lib/utils/visit-status";
+import { isCarryForwardVisit } from "@/lib/utils/carry-forward";
 
-// ─── GET /api/visits ───────────────────────────────────────────────────────────
+// --- GET /api/visits -------------------------------------------------------------
 // Executive gets their assigned visits.
 // Optimized: select only required fields (no subtask IDs, no task content)
 
@@ -27,6 +28,8 @@ export async function GET(request: NextRequest) {
         visitNumber:   true,
         status:        true,
         scheduledDate: true,
+        endDate:       true,
+        notes:         true,
         client: {
           select: { name: true, code: true, contactPerson: true },
         },
@@ -36,7 +39,7 @@ export async function GET(request: NextRequest) {
         tasks: {
           select: {
             subtasks: {
-              // Only the boolean fields we need — no IDs or text
+              // Only the boolean fields we need - no IDs or text
               select: { isCompleted: true, isCarriedForward: true },
             },
           },
@@ -48,13 +51,18 @@ export async function GET(request: NextRequest) {
     // Compute progress-based displayStatus using shared utility
     const visitsWithProgress = visits.map((visit) => {
       const { totalSubtasks, completedSubtasks, carryForwardCount, progress, displayStatus } =
-        getSubtaskTotals(visit.tasks);
+        getSubtaskTotals(visit.tasks, visit.status);
+      // Carry-forward can originate from subtask-level carries (Business
+      // Rule 1) OR an auto-created "missed weekly visit" (Business Rule 2,
+      // flagged via the notes marker) — shared helper, single source of truth.
+      const hasCarryForward = carryForwardCount > 0 || isCarryForwardVisit(visit);
       return {
         ...visit,
         progress,
         totalSubtasks,
         completedSubtasks,
         carryForwardCount,
+        hasCarryForward,
         displayStatus,
       };
     });

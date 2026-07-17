@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/middleware";
+import { syncAfterTemplateChange } from "@/lib/utils/create-visit";
 
 export async function GET(request: NextRequest) {
   const user = await getAuthUser(request);
@@ -80,6 +81,9 @@ export async function POST(request: NextRequest) {
         metadata: { action: "created", templateId: template.id, taskType, title: template.title, clientId: clientId ?? null },
       },
     });
+
+    // Propagate immediately to already-scheduled PENDING visits
+    await syncAfterTemplateChange(clientId ?? null);
 
     return NextResponse.json({ template }, { status: 201 });
   } catch (error) {
