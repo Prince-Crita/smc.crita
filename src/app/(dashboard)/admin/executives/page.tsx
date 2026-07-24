@@ -1,17 +1,20 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, memo } from "react";
+import { useState, useCallback, useMemo, memo } from "react";
 import {
   Plus, Search, UserCog, Phone, Mail,
-  CheckCircle2, Clock, TrendingUp, Key, Edit, PowerOff,
+  CheckCircle2, Clock, TrendingUp, Key, Edit, MoreVertical, PowerOff, Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { AddExecutiveModal } from "@/components/admin/AddExecutiveModal";
 import { ExecutiveDetailModal } from "@/components/admin/ExecutiveDetailModal";
 import { Modal } from "@/components/ui/Modal";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/DropdownMenu";
 import toast from "react-hot-toast";
 import { cn } from "@/lib/utils/utils";
+import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
 
 interface Executive {
   id: string;
@@ -35,12 +38,14 @@ const ExecutiveCard = memo(function ExecutiveCard({
   onEdit,
   onResetPassword,
   onToggleActive,
+  onDelete,
 }: {
   exec: Executive;
   onView: (id: string) => void;
   onEdit: (exec: Executive) => void;
   onResetPassword: (exec: Executive) => void;
   onToggleActive: (exec: Executive) => void;
+  onDelete: (exec: Executive) => void;
 }) {
   return (
     <div className="bg-white border border-[#e2e7f0] rounded-xl p-5 hover:border-[#c8d2e0] hover:shadow-md transition-all duration-200 card-hover flex flex-col shadow-sm">
@@ -139,18 +144,26 @@ const ExecutiveCard = memo(function ExecutiveCard({
         >
           <Key className="w-3.5 h-3.5" />
         </button>
-        <button
-          onClick={() => onToggleActive(exec)}
-          className={cn(
-            "p-2 rounded-lg bg-[#f1f4f9] transition-all press-effect",
-            exec.isActive
-              ? "text-[#8896a9] hover:text-red-600 hover:bg-red-50"
-              : "text-[#8896a9] hover:text-green-600 hover:bg-green-50"
-          )}
-          title={exec.isActive ? "Deactivate" : "Activate"}
-        >
-          <PowerOff className="w-3.5 h-3.5" />
-        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="p-2 rounded-lg bg-[#f1f4f9] hover:bg-[#e2e7f0] text-[#8896a9] hover:text-[#0f1829] transition-all press-effect"
+              title="More actions"
+            >
+              <MoreVertical className="w-3.5 h-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuItem onSelect={() => onToggleActive(exec)}>
+              <PowerOff className="w-4 h-4" />
+              {exec.isActive ? "Deactivate" : "Activate"}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onDelete(exec)} danger>
+              <Trash2 className="w-4 h-4" />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
   );
@@ -159,8 +172,6 @@ const ExecutiveCard = memo(function ExecutiveCard({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ExecutivesPage() {
-  const [executives, setExecutives] = useState<Executive[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
   const [editExec, setEditExec] = useState<Executive | null>(null);
@@ -168,21 +179,14 @@ export default function ExecutivesPage() {
   const [resetExec, setResetExec] = useState<Executive | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [resetting, setResetting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Executive | null>(null);
 
-  const fetchExecutives = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/admin/executives");
-      const data = await res.json();
-      setExecutives(data.executives ?? []);
-    } catch {
-      toast.error("Failed to load executives");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { fetchExecutives(); }, [fetchExecutives]);
+  const fetchExecutivesData = useCallback(
+    () => fetchJSON<{ executives?: Executive[] }>("/api/admin/executives"),
+    []
+  );
+  const { data, loading, refresh: fetchExecutives } = useLiveQuery(fetchExecutivesData);
+  const executives = data?.executives ?? [];
 
   const filtered = useMemo(() => {
     const term = search.toLowerCase();
@@ -231,6 +235,22 @@ export default function ExecutivesPage() {
   const handleView = useCallback((id: string) => setDetailExecId(id), []);
   const handleEdit = useCallback((exec: Executive) => setEditExec(exec), []);
   const handleResetOpen = useCallback((exec: Executive) => { setResetExec(exec); setNewPassword(""); }, []);
+  const handleDeleteOpen = useCallback((exec: Executive) => setDeleteTarget(exec), []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteTarget) return;
+    try {
+      const res = await fetch(`/api/admin/executives/${deleteTarget.id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(data.error || "Failed to delete executive"); return; }
+      toast.success("Executive deleted");
+      fetchExecutives();
+    } catch {
+      toast.error("Error deleting executive");
+    } finally {
+      setDeleteTarget(null);
+    }
+  }, [deleteTarget, fetchExecutives]);
 
   return (
     <div className="space-y-6 animate-in">
@@ -294,6 +314,7 @@ export default function ExecutivesPage() {
               onEdit={handleEdit}
               onResetPassword={handleResetOpen}
               onToggleActive={toggleActive}
+              onDelete={handleDeleteOpen}
             />
           ))}
         </div>
@@ -348,6 +369,17 @@ export default function ExecutivesPage() {
           )}
         </div>
       </Modal>
+
+      {/* Delete confirmation */}
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        title="Delete Executive"
+        message="Are you sure you want to permanently delete this executive? This action cannot be undone."
+        confirmLabel="Delete"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

@@ -16,9 +16,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { email, password } = result.data;
+    const { identifier, password } = result.data;
+    const trimmedIdentifier = identifier.trim();
+    const isEmail = trimmedIdentifier.includes("@");
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = isEmail
+      ? await prisma.user.findUnique({ where: { email: trimmedIdentifier } })
+      : await prisma.user.findUnique({ where: { phone: trimmedIdentifier.replace(/\s+/g, "") } });
     if (!user) {
       return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
     }

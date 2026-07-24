@@ -141,11 +141,14 @@ function LeaveCard({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function AdminLeavesPage() {
   const [statusFilter, setStatusFilter] = useState<"PENDING" | "APPROVED" | "REJECTED" | "all">("PENDING");
+  const [monthFilter, setMonthFilter] = useState(() => new Date().toISOString().slice(0, 7));
 
   const fetchLeaves = useCallback(async () => {
-    const json = await fetchJSON<{ leaves: LeaveRequest[] }>(`/api/admin/leaves?status=${statusFilter}`);
+    const params = new URLSearchParams({ status: statusFilter });
+    if (monthFilter) params.set("month", monthFilter);
+    const json = await fetchJSON<{ leaves: LeaveRequest[] }>(`/api/admin/leaves?${params.toString()}`);
     return json.leaves ?? [];
-  }, [statusFilter]);
+  }, [statusFilter, monthFilter]);
 
   const { data, loading, refresh: refreshLeaves } = useLiveQuery(fetchLeaves);
   const leaves = data ?? [];
@@ -200,22 +203,40 @@ export default function AdminLeavesPage() {
         </button>
       </div>
 
-      {/* ── Status tabs ── */}
-      <div className="flex gap-1 p-1 bg-[#f8f9fc] rounded-lg border border-[#e2e7f0]">
-        {tabs.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setStatusFilter(tab.key)}
-            className={cn(
-              "flex-1 px-3 py-1.5 rounded-md text-xs font-semibold transition-all",
-              statusFilter === tab.key
-                ? "bg-white text-[#25488e] shadow-sm border border-[#e2e7f0]"
-                : "text-[#8896a9] hover:text-[#4a5568]"
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
+      {/* ── Status tabs + month filter ── */}
+      <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+        <div className="flex gap-1 p-1 bg-[#f8f9fc] rounded-lg border border-[#e2e7f0]">
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setStatusFilter(tab.key)}
+              className={cn(
+                "flex-1 px-3 py-1.5 rounded-md text-xs font-semibold transition-all",
+                statusFilter === tab.key
+                  ? "bg-white text-[#25488e] shadow-sm border border-[#e2e7f0]"
+                  : "text-[#8896a9] hover:text-[#4a5568]"
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="month"
+            value={monthFilter}
+            onChange={(e) => setMonthFilter(e.target.value)}
+            className="border border-[#e2e7f0] rounded-lg px-3 py-2 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30"
+          />
+          {monthFilter && (
+            <button
+              onClick={() => setMonthFilter("")}
+              className="text-xs font-semibold text-[#25488e] hover:text-[#1e3a72] px-2 py-1 transition-colors"
+            >
+              All time
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── Leave cards ── */}

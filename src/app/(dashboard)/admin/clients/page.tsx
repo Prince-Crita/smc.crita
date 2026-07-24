@@ -3,12 +3,13 @@
 import { useState, useEffect, useCallback, useMemo, memo } from "react";
 import {
   Plus, Search, Building2, Mail, Phone, Users,
-  Archive, RefreshCw, Edit, MapPin, Copy,
+  Archive, RefreshCw, Edit, MapPin, Copy, MoreVertical, Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/DropdownMenu";
 import { AddClientModal } from "@/components/admin/AddClientModal";
 import toast from "react-hot-toast";
 import { formatDate, cn } from "@/lib/utils/utils";
@@ -45,12 +46,14 @@ const ClientCard = memo(function ClientCard({
   onArchive,
   onUnarchive,
   onDuplicate,
+  onDelete,
 }: {
   client: Client;
   onEdit: (client: Client) => void;
   onArchive: (client: Client) => void;
   onUnarchive: (client: Client) => void;
   onDuplicate: (client: Client) => void;
+  onDelete: (client: Client) => void;
 }) {
   return (
     <div className={cn(
@@ -162,13 +165,26 @@ const ClientCard = memo(function ClientCard({
             >
               <Copy className="w-3.5 h-3.5" />
             </button>
-            <button
-              onClick={() => onArchive(client)}
-              className="p-2 rounded-lg bg-[#f1f4f9] hover:bg-red-50 text-[#8896a9] hover:text-red-700 transition-all press-effect"
-              title="Archive"
-            >
-              <Archive className="w-3.5 h-3.5" />
-            </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="p-2 rounded-lg bg-[#f1f4f9] hover:bg-[#e2e7f0] text-[#8896a9] hover:text-[#0f1829] transition-all press-effect"
+                  title="More actions"
+                >
+                  <MoreVertical className="w-3.5 h-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onSelect={() => onArchive(client)}>
+                  <Archive className="w-4 h-4" />
+                  Archive
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onDelete(client)} danger>
+                  <Trash2 className="w-4 h-4" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </>
         )}
       </div>
@@ -225,8 +241,25 @@ export default function ClientsPage() {
   }, [clients, search]);
 
   const [archiveTarget, setArchiveTarget] = useState<Client | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Client | null>(null);
 
   const handleArchive = useCallback((client: Client) => setArchiveTarget(client), []);
+  const handleDelete = useCallback((client: Client) => setDeleteTarget(client), []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteTarget) return;
+    try {
+      const res = await fetch(`/api/admin/clients/${deleteTarget.id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(data.error || "Failed to delete client"); return; }
+      toast.success("Client deleted");
+      fetchAll();
+    } catch {
+      toast.error("Error deleting client");
+    } finally {
+      setDeleteTarget(null);
+    }
+  }, [deleteTarget, fetchAll]);
 
   const confirmArchive = useCallback(async () => {
     if (!archiveTarget) return;
@@ -399,6 +432,7 @@ export default function ClientsPage() {
               onArchive={handleArchive}
               onUnarchive={handleUnarchive}
               onDuplicate={handleDuplicateOpen}
+              onDelete={handleDelete}
             />
           ))}
         </div>
@@ -421,6 +455,17 @@ export default function ClientsPage() {
         danger
         onConfirm={confirmArchive}
         onCancel={() => setArchiveTarget(null)}
+      />
+
+      {/* ── Delete Confirmation ────────────────────────────────────────────── */}
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        title="Delete Client"
+        message="Are you sure you want to permanently delete this client? This action cannot be undone."
+        confirmLabel="Delete"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
       />
 
       {/* ── Duplicate Client Modal ─────────────────────────────────────────── */}

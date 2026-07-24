@@ -8,7 +8,7 @@ export async function getAuthUser(request: NextRequest) {
   return verifyJwt(token);
 }
 
-export function requireAuth(role?: "ADMIN" | "EXECUTIVE") {
+export function requireAuth(role?: "ADMIN" | "EXECUTIVE" | "SUPER_ADMIN") {
   return async (request: NextRequest) => {
     const user = await getAuthUser(request);
     if (!user) {

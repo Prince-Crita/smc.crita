@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import toast from "react-hot-toast";
 import Image from "next/image";
-import { Eye, EyeOff, Lock, Mail } from "lucide-react";
+import { Eye, EyeOff, Lock, User } from "lucide-react";
 import { loginSchema, LoginInput } from "@/lib/validations/auth";
 
 export default function LoginForm() {
@@ -40,10 +40,10 @@ export default function LoginForm() {
 
       toast.success(`Welcome back, ${json.user.name}!`);
 
-      if (json.user.role === "ADMIN") {
-        router.push("/admin");
-      } else {
+      if (json.user.role === "EXECUTIVE") {
         router.push("/executive");
+      } else {
+        router.push("/admin");
       }
     } catch {
       toast.error("Something went wrong. Please try again.");
@@ -117,24 +117,24 @@ export default function LoginForm() {
             </div>
 
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-              {/* Email */}
+              {/* Email or Mobile Number */}
               <div>
-                <label htmlFor="email" className="block text-sm font-semibold text-[#4a5568] mb-1.5">
-                  Email Address
+                <label htmlFor="identifier" className="block text-sm font-semibold text-[#4a5568] mb-1.5">
+                  Email or Mobile Number
                 </label>
                 <div className="relative">
-                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8896a9]" />
+                  <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8896a9]" />
                   <input
-                    id="email"
-                    type="email"
-                    autoComplete="email"
-                    placeholder="name@smcaudit.com"
-                    {...register("email")}
+                    id="identifier"
+                    type="text"
+                    autoComplete="username"
+                    placeholder="name@smcaudit.com or 9994096508"
+                    {...register("identifier")}
                     className="w-full pl-10 pr-4 py-3 bg-[#f8f9fc] border border-[#e2e7f0] rounded-xl text-[#0f1829] placeholder-[#8896a9] text-sm focus:outline-none focus:ring-2 focus:ring-[#25488e]/30 focus:border-[#25488e] transition-all"
                   />
                 </div>
-                {errors.email && (
-                  <p className="mt-1.5 text-xs text-red-500">{errors.email.message}</p>
+                {errors.identifier && (
+                  <p className="mt-1.5 text-xs text-red-500">{errors.identifier.message}</p>
                 )}
               </div>
 
@@ -183,13 +183,6 @@ export default function LoginForm() {
                 )}
               </button>
             </form>
-
-            {/* Default credentials hint */}
-            <div className="mt-6 p-3.5 bg-[#eef2f9] rounded-xl border border-[#adc2e2]">
-              <p className="text-xs text-[#4a5568] text-center">
-                Default password: <span className="font-semibold text-[#25488e]">Password@123</span>
-              </p>
-            </div>
           </div>
 
           <p className="text-center text-xs text-[#8896a9] mt-6">

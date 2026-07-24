@@ -6,10 +6,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/middleware";
+import { isAdminRole } from "@/lib/auth/roles";
 
 export async function GET(request: NextRequest) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!user || !isAdminRole(user.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
     const [clients, templateCounts] = await Promise.all([

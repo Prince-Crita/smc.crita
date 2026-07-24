@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth/middleware";
+import { isAdminRole } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/prisma";
 
 // ─── PATCH /api/leaves/[id] ── Admin: approve or reject ────────────────────
@@ -8,7 +9,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN") {
+  if (!user || !isAdminRole(user.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

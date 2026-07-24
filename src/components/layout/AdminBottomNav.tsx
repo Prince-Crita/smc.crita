@@ -16,6 +16,7 @@ import {
   Clock,
   FileText,
   CalendarDays,
+  ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils/utils";
 import toast from "react-hot-toast";
@@ -37,11 +38,7 @@ const menuItems = [
   { href: "/admin/leaves",        icon: FileText,   label: "Leave Approvals" },
 ];
 
-// Routes that belong to the menu sheet — used to detect if the sheet trigger
-// itself should appear "active" when the user is on one of these pages.
-const menuRoutes = menuItems.map((m) => m.href);
-
-export default function AdminBottomNav() {
+export default function AdminBottomNav({ userRole }: { userRole?: "ADMIN" | "EXECUTIVE" | "SUPER_ADMIN" }) {
   const pathname    = usePathname();
   const router      = useRouter();
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -59,6 +56,14 @@ export default function AdminBottomNav() {
     }
     return () => { document.body.style.overflow = ""; };
   }, [sheetOpen]);
+
+  const items = userRole === "SUPER_ADMIN"
+    ? [...menuItems, { href: "/admin/admin-management", icon: ShieldCheck, label: "Admin Management" }]
+    : menuItems;
+
+  // Routes that belong to the menu sheet — used to detect if the sheet trigger
+  // itself should appear "active" when the user is on one of these pages.
+  const menuRoutes = items.map((m) => m.href);
 
   const isActive = (href: string, exact?: boolean) =>
     exact ? pathname === href : pathname.startsWith(href);
@@ -197,7 +202,7 @@ export default function AdminBottomNav() {
 
         {/* Sheet nav items */}
         <div className="px-3 py-3 space-y-1">
-          {menuItems.map(({ href, icon: Icon, label }) => {
+          {items.map(({ href, icon: Icon, label }) => {
             const active = isActive(href, false);
             return (
               <button

@@ -4,7 +4,7 @@ export interface JwtPayload {
   userId: string;
   email: string;
   name: string;
-  role: "ADMIN" | "EXECUTIVE";
+  role: "ADMIN" | "EXECUTIVE" | "SUPER_ADMIN";
   iat?: number;
   exp?: number;
 }

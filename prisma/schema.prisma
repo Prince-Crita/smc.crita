@@ -13,12 +13,14 @@ datasource db {
 enum Role {
   ADMIN
   EXECUTIVE
+  SUPER_ADMIN
 }
 
 enum VisitStatus {
   PENDING
   OPEN
   CLOSED
+  CANCELLED
 }
 
 // NOTE: TaskType enum kept for reference only.
@@ -61,11 +63,17 @@ enum ActivityAction {
   EXECUTIVE_UPDATED
   EXECUTIVE_DEACTIVATED
   EXECUTIVE_PASSWORD_RESET
+  EXECUTIVE_DELETED
   CLIENT_ADDED
   CLIENT_UPDATED
   CLIENT_ARCHIVED
+  CLIENT_DELETED
   VISIT_REASSIGNED
   SUBTASK_TEMPLATE_UPDATED
+  ADMIN_ADDED
+  ADMIN_UPDATED
+  ADMIN_DEACTIVATED
+  ADMIN_PASSWORD_RESET
 }
 
 enum LeaveStatus {
@@ -86,7 +94,7 @@ model User {
   email        String   @unique
   passwordHash String
   role         Role
-  phone        String?
+  phone        String?  @unique
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -154,6 +162,7 @@ model Client {
   email          String?
   reportEmails   String[]  @default([])
   assignedExecId String?
+  seniorExecId   String?
   startDate      DateTime?
   endDate        DateTime?
   isArchived     Boolean   @default(false)

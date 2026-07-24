@@ -8,12 +8,13 @@ import toast from "react-hot-toast";
 import {
   LayoutDashboard, ClipboardList, RotateCcw, LogOut,
   ChevronLeft, Building2, CheckSquare, UserCog, Settings2,
-  CalendarDays, Clock, FileText,
+  CalendarDays, Clock, FileText, ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils/utils";
+import { isAdminRole } from "@/lib/auth/roles";
 
 interface SidebarProps {
-  userRole: "ADMIN" | "EXECUTIVE";
+  userRole: "ADMIN" | "EXECUTIVE" | "SUPER_ADMIN";
   userName: string;
   userEmail: string;
 }
@@ -34,6 +35,12 @@ const adminNavItems: NavItem[] = [
   { type: "separator", label: "HR & Operations" },
   { href: "/admin/attendance", icon: Clock, label: "Attendance" },
   { href: "/admin/leaves", icon: FileText, label: "Leave Approvals" },
+];
+
+const superAdminNavItems: NavItem[] = [
+  ...adminNavItems,
+  { type: "separator", label: "Super Admin" },
+  { href: "/admin/admin-management", icon: ShieldCheck, label: "Admin Management" },
 ];
 
 const executiveNavItems: NavItem[] = [
@@ -137,7 +144,7 @@ function SidebarLogo({ collapsed }: { collapsed: boolean }) {
 const SidebarContent = memo(function SidebarContent({
   userRole, userName, userEmail, isCollapsed, onClose, onLogout, loggingOut, pathname,
 }: {
-  userRole: "ADMIN" | "EXECUTIVE";
+  userRole: "ADMIN" | "EXECUTIVE" | "SUPER_ADMIN";
   userName: string;
   userEmail: string;
   isCollapsed: boolean;
@@ -146,7 +153,8 @@ const SidebarContent = memo(function SidebarContent({
   loggingOut: boolean;
   pathname: string;
 }) {
-  const navItems = userRole === "ADMIN" ? adminNavItems : executiveNavItems;
+  const navItems =
+    userRole === "SUPER_ADMIN" ? superAdminNavItems : userRole === "ADMIN" ? adminNavItems : executiveNavItems;
 
   const isActive = (href: string, exact?: boolean) =>
     exact ? pathname === href : pathname.startsWith(href);
@@ -159,7 +167,7 @@ const SidebarContent = memo(function SidebarContent({
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto no-scrollbar">
         {!isCollapsed && (
           <p className="px-3 mb-3 text-[10px] font-bold text-white/30 uppercase tracking-widest">
-            {userRole === "ADMIN" ? "Main Menu" : "Field Operations"}
+            {isAdminRole(userRole) ? "Main Menu" : "Field Operations"}
           </p>
         )}
 
@@ -200,7 +208,7 @@ const SidebarContent = memo(function SidebarContent({
             <div className="min-w-0">
               <p className="text-sm font-semibold text-white truncate leading-tight">{userName}</p>
               <p className="text-xs text-white/40 truncate mt-0.5">
-                {userRole === "ADMIN" ? "Admin" : "Executive"}
+                {userRole === "SUPER_ADMIN" ? "Super Admin" : userRole === "ADMIN" ? "Admin" : "Executive"}
               </p>
             </div>
           </div>

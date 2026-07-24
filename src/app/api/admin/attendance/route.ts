@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth/middleware";
+import { isAdminRole } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/prisma";
 import { toMidnightIST } from "@/lib/utils/attendance";
 
@@ -7,7 +8,7 @@ import { toMidnightIST } from "@/lib/utils/attendance";
 // Query params: date (YYYY-MM-DD), executiveId
 export async function GET(request: NextRequest) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN") {
+  if (!user || !isAdminRole(user.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

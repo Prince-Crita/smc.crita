@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Users, Clock, AlertCircle, RefreshCw } from "lucide-react";
+import { useState, useCallback } from "react";
+import { Users, Clock, AlertCircle, RefreshCw, CalendarDays, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils/utils";
 import { SkeletonTable } from "@/components/ui/Skeleton";
 import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
@@ -35,6 +35,41 @@ function fmtMinutes(min: number) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function AdminAttendancePage() {
+  const [tab, setTab] = useState<"daily" | "monthly">("daily");
+
+  return (
+    <div className="animate-in space-y-6">
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-[#0f1829]">Attendance</h1>
+          <p className="text-sm text-[#8896a9] mt-0.5">Executive attendance overview</p>
+        </div>
+      </div>
+
+      {/* ── Daily / Monthly segmented control ── */}
+      <div className="inline-flex p-1 rounded-lg bg-[#f1f4f9] border border-[#e2e7f0]">
+        {(["daily", "monthly"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={cn(
+              "px-4 py-2 rounded-md text-sm font-semibold transition-all press-effect capitalize",
+              tab === t ? "bg-white text-[#25488e] shadow-sm" : "text-[#8896a9] hover:text-[#4a5568]"
+            )}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {tab === "daily" ? <DailyAttendanceView /> : <MonthlyAttendanceView />}
+    </div>
+  );
+}
+
+// ─── Daily View ─────────────────────────────────────────────────────────────
+function DailyAttendanceView() {
   const [dateFilter, setDateFilter] = useState(
     () => new Date().toISOString().split("T")[0]
   );
@@ -62,13 +97,8 @@ export default function AdminAttendancePage() {
   const absentCount  = absentExecs.length;
 
   return (
-    <div className="animate-in space-y-6">
-      {/* ── Header ── */}
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-[#0f1829]">Attendance</h1>
-          <p className="text-sm text-[#8896a9] mt-0.5">Executive daily attendance overview</p>
-        </div>
+    <div className="space-y-6">
+      <div className="flex justify-end">
         <button onClick={refresh} disabled={loading}
           className="p-2 rounded-lg bg-[#f1f4f9] hover:bg-[#e2e7f0] text-[#8896a9] transition-colors disabled:opacity-50">
           <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
@@ -196,6 +226,188 @@ export default function AdminAttendancePage() {
                 </span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Monthly View ────────────────────────────────────────────────────────────
+interface MonthlySummaryRow {
+  executiveId: string;
+  executiveName: string;
+  executiveEmail: string;
+  presentCount: number;
+  absentCount: number;
+  leaveCount: number;
+  lateCount: number;
+  totalWorkingDays: number;
+  attendancePercentage: number;
+}
+interface DailyRow {
+  date: string;
+  status: "PRESENT" | "ABSENT" | "LEAVE";
+  punchIn: string | null;
+  punchOut: string | null;
+  isLate: boolean;
+}
+interface MonthlyData {
+  month: string;
+  executives: Executive[];
+  summary: MonthlySummaryRow[];
+  daily: DailyRow[];
+}
+
+function MonthlyAttendanceView() {
+  const [monthFilter, setMonthFilter] = useState(
+    () => new Date().toISOString().slice(0, 7)
+  );
+  const [execFilter, setExecFilter] = useState("");
+
+  const fetchData = useCallback(async () => {
+    const params = new URLSearchParams();
+    params.set("month", monthFilter);
+    if (execFilter) params.set("executiveId", execFilter);
+    return fetchJSON<MonthlyData>(`/api/admin/attendance/monthly?${params.toString()}`);
+  }, [monthFilter, execFilter]);
+
+  const { data, loading, refresh } = useLiveQuery(fetchData);
+
+  const executives = data?.executives ?? [];
+  const summary = data?.summary ?? [];
+  const daily = data?.daily ?? [];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-end">
+        <button onClick={refresh} disabled={loading}
+          className="p-2 rounded-lg bg-[#f1f4f9] hover:bg-[#e2e7f0] text-[#8896a9] transition-colors disabled:opacity-50">
+          <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
+        </button>
+      </div>
+
+      {/* ── Filters ── */}
+      <div className="flex flex-wrap gap-3">
+        <input
+          type="month"
+          value={monthFilter}
+          onChange={(e) => setMonthFilter(e.target.value)}
+          className="border border-[#e2e7f0] rounded-lg px-3 py-2 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30"
+        />
+        <select
+          value={execFilter}
+          onChange={(e) => setExecFilter(e.target.value)}
+          className="border border-[#e2e7f0] rounded-lg px-3 py-2 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30"
+        >
+          <option value="">All Executives</option>
+          {executives.map((e) => (
+            <option key={e.id} value={e.id}>{e.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* ── Per-executive summary ── */}
+      <div className="bg-white border border-[#e2e7f0] rounded-xl shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-[#e2e7f0]">
+          <h2 className="text-base font-bold text-[#0f1829]">Monthly Summary</h2>
+          <p className="text-sm text-[#8896a9]">
+            {new Date(`${monthFilter}-01T12:00:00Z`).toLocaleDateString("en-IN", { month: "long", year: "numeric" })}
+          </p>
+        </div>
+        {loading ? (
+          <div className="p-4"><SkeletonTable rows={5} /></div>
+        ) : summary.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center px-6">
+            <CalendarDays className="w-10 h-10 text-[#c8d2e0] mb-3" />
+            <p className="text-sm font-medium text-[#4a5568]">No executives found</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="bg-[#f8f9fc] border-b border-[#e2e7f0]">
+                  {["Executive", "Present", "Absent", "Leave", "Late", "Working Days", "Attendance %"].map((h) => (
+                    <th key={h} className="text-left text-xs font-semibold text-[#8896a9] px-5 py-3 whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {summary.map((row) => (
+                  <tr key={row.executiveId} className="border-b border-[#f1f4f9] hover:bg-[#f8f9fc] transition-colors">
+                    <td className="px-5 py-3.5">
+                      <p className="text-sm font-semibold text-[#0f1829]">{row.executiveName}</p>
+                      <p className="text-xs text-[#8896a9]">{row.executiveEmail}</p>
+                    </td>
+                    <td className="px-5 py-3.5 text-sm text-green-700 font-semibold tabular-nums">{row.presentCount}</td>
+                    <td className="px-5 py-3.5 text-sm text-red-600 font-semibold tabular-nums">{row.absentCount}</td>
+                    <td className="px-5 py-3.5 text-sm text-amber-600 font-semibold tabular-nums">{row.leaveCount}</td>
+                    <td className="px-5 py-3.5 text-sm text-[#0f1829] tabular-nums">{row.lateCount}</td>
+                    <td className="px-5 py-3.5 text-sm text-[#0f1829] tabular-nums">{row.totalWorkingDays}</td>
+                    <td className="px-5 py-3.5">
+                      <span className={cn(
+                        "text-[11px] font-bold px-2 py-0.5 rounded-full border",
+                        row.attendancePercentage >= 90
+                          ? "bg-green-50 text-green-700 border-green-200"
+                          : row.attendancePercentage >= 75
+                          ? "bg-amber-50 text-amber-700 border-amber-200"
+                          : "bg-red-50 text-red-700 border-red-200"
+                      )}>
+                        {row.attendancePercentage}%
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── Day-by-day breakdown (only when a single executive is selected) ── */}
+      {execFilter && daily.length > 0 && (
+        <div className="bg-white border border-[#e2e7f0] rounded-xl shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-[#e2e7f0] flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-[#25488e]" />
+            <h2 className="text-base font-bold text-[#0f1829]">Day-by-Day Breakdown</h2>
+          </div>
+          <div className="overflow-x-auto max-h-[480px] overflow-y-auto">
+            <table className="w-full">
+              <thead className="sticky top-0 bg-[#f8f9fc]">
+                <tr className="border-b border-[#e2e7f0]">
+                  {["Date", "Status", "Punch In", "Punch Out"].map((h) => (
+                    <th key={h} className="text-left text-xs font-semibold text-[#8896a9] px-5 py-3">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {daily.map((d) => (
+                  <tr key={d.date} className="border-b border-[#f1f4f9] hover:bg-[#f8f9fc] transition-colors">
+                    <td className="px-5 py-3 text-sm text-[#0f1829] tabular-nums">
+                      {new Date(`${d.date}T12:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", weekday: "short" })}
+                    </td>
+                    <td className="px-5 py-3">
+                      <span className={cn(
+                        "text-[11px] font-bold px-2 py-0.5 rounded-full border",
+                        d.status === "PRESENT"
+                          ? d.isLate ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-green-50 text-green-700 border-green-200"
+                          : d.status === "LEAVE"
+                          ? "bg-[#eef2fb] text-[#25488e] border-[#d4ddf5]"
+                          : "bg-red-50 text-red-700 border-red-200"
+                      )}>
+                        {d.status === "PRESENT" && d.isLate ? "Late" : d.status.charAt(0) + d.status.slice(1).toLowerCase()}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 text-sm text-[#0f1829] tabular-nums">
+                      {d.punchIn ? fmtTime(d.punchIn) : <span className="text-[#8896a9]">—</span>}
+                    </td>
+                    <td className="px-5 py-3 text-sm text-[#0f1829] tabular-nums">
+                      {d.punchOut ? fmtTime(d.punchOut) : <span className="text-[#8896a9]">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

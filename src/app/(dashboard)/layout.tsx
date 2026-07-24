@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { verifyJwt, COOKIE_NAME } from "@/lib/auth/jwt";
+import { isAdminRole } from "@/lib/auth/roles";
 import Sidebar from "@/components/layout/Sidebar";
 import BottomNav from "@/components/layout/BottomNav";
 import AdminBottomNav from "@/components/layout/AdminBottomNav";
@@ -17,6 +18,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (!user) redirect("/login");
 
   const isExecutive = user.role === "EXECUTIVE";
+  const isAdmin = isAdminRole(user.role);
+  const roleLabel = user.role === "SUPER_ADMIN" ? "Super Admin" : user.role === "ADMIN" ? "Admin" : "Executive";
 
   return (
     <div className="min-h-screen bg-[#f8f9fc] flex">
@@ -32,7 +35,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 SMC Audit Services
                 <span className="mx-1.5 text-[#c8d2e0]">›</span>
                 <span className="text-[#4a5568]">
-                  {user.role === "ADMIN" ? "Administration" : "Field Executive"}
+                  {isAdmin ? "Administration" : "Field Executive"}
                 </span>
               </p>
               {/* Mobile: show company logo instead of plain text — same for Admin & Executive */}
@@ -52,19 +55,19 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <div className="flex items-center gap-3">
             {/* Role badge */}
             <div className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold ${
-              user.role === "ADMIN"
+              isAdmin
                 ? "bg-[#eef2f9] border-[#adc2e2] text-[#25488e]"
                 : "bg-[#fff0f6] border-[#ffadd1] text-[#800040]"
             }`}>
               <span className={`w-1.5 h-1.5 rounded-full ${
-                user.role === "ADMIN" ? "bg-[#25488e]" : "bg-[#800040]"
+                isAdmin ? "bg-[#25488e]" : "bg-[#800040]"
               }`} />
-              {user.role === "ADMIN" ? "Admin" : "Executive"}
+              {roleLabel}
             </div>
 
             {/* Avatar */}
             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-sm ring-2 ring-[#e2e7f0] ${
-              user.role === "ADMIN" ? "bg-[#25488e]" : "bg-[#800040]"
+              isAdmin ? "bg-[#25488e]" : "bg-[#800040]"
             }`}>
               {user.name.charAt(0).toUpperCase()}
             </div>
@@ -78,7 +81,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       </div>
 
       {/* ── Mobile bottom nav ── */}
-      {isExecutive ? <BottomNav /> : <AdminBottomNav />}
+      {isExecutive ? <BottomNav /> : <AdminBottomNav userRole={user.role} />}
 
       {/* ── Toast notifications ── */}
       <Toaster

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth/middleware";
+import { isAdminRole } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/prisma";
 import { CARRY_FORWARD_NOTE_PREFIX, runCarryForwardMaintenance } from "@/lib/utils/carry-forward";
 
@@ -11,7 +12,7 @@ import { CARRY_FORWARD_NOTE_PREFIX, runCarryForwardMaintenance } from "@/lib/uti
 // Also runs the two DB queries in parallel via Promise.all.
 export async function GET(request: NextRequest) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN") {
+  if (!user || !isAdminRole(user.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -182,7 +183,7 @@ export async function GET(request: NextRequest) {
 // removed - completed work and closed history are never touched.
 export async function DELETE(request: NextRequest) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN") {
+  if (!user || !isAdminRole(user.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -238,7 +239,7 @@ export async function DELETE(request: NextRequest) {
 // Body: { taskId: string, title: string }
 export async function POST(request: NextRequest) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN") {
+  if (!user || !isAdminRole(user.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

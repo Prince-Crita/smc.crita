@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/middleware";
+import { isAdminRole } from "@/lib/auth/roles";
 import { createVisitForClient } from "@/lib/utils/create-visit";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!user || !isAdminRole(user.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { id } = await params;
 
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!user || !isAdminRole(user.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { id } = await params;
 
@@ -109,6 +110,48 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     });
   } catch (error) {
     console.error("Update client error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+// ─── DELETE /api/admin/clients/[id] ───────────────────────────────────────────
+// Permanently deletes a client. Blocked if the client has any visits (which
+// carry the report/task/subtask history) — Visit.clientId is required with no
+// cascade-delete from Client, so any visit history would block this at the
+// database level anyway. ClientTaskType/SubtaskTemplate rows cascade-delete
+// automatically via the schema.
+
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const user = await getAuthUser(request);
+  if (!user || !isAdminRole(user.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const { id } = await params;
+
+  try {
+    const existing = await prisma.client.findUnique({ where: { id } });
+    if (!existing) return NextResponse.json({ error: "Client not found" }, { status: 404 });
+
+    const visitCount = await prisma.visit.count({ where: { clientId: id } });
+    if (visitCount > 0) {
+      return NextResponse.json(
+        { error: "Client has visits, reports, or task history and cannot be deleted." },
+        { status: 409 }
+      );
+    }
+
+    await prisma.client.delete({ where: { id } });
+
+    await prisma.activityLog.create({
+      data: {
+        userId: user.userId,
+        action: "CLIENT_DELETED",
+        metadata: { clientId: id, clientName: existing.name, deletedBy: user.name },
+      },
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Delete client error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

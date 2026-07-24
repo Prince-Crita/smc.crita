@@ -127,6 +127,57 @@ async function main() {
     },
   });
 
+  // Permanent Super Admin account
+  await prisma.user.create({
+    data: {
+      name: "Crita",
+      email: "Crita@smc.com",
+      passwordHash: await bcrypt.hash("Access@Crita123", 12),
+      role: Role.SUPER_ADMIN,
+    },
+  });
+
+  // Additional Admin accounts (email + password login)
+  await prisma.user.create({
+    data: {
+      name: "murali",
+      email: "md@shaabi.net",
+      passwordHash: await bcrypt.hash("mura@123", 12),
+      role: Role.ADMIN,
+    },
+  });
+  await prisma.user.create({
+    data: {
+      name: "selvi",
+      email: "admin@shaabi.net",
+      passwordHash: await bcrypt.hash("selv@123", 12),
+      role: Role.ADMIN,
+    },
+  });
+
+  // Executive accounts that log in via mobile number + password
+  const mobileExecutives = [
+    { name: "john", phone: "9994096508", password: "john@123" },
+    { name: "logesh", phone: "8015675796", password: "loge@123" },
+    { name: "dhamotharan", phone: "8754392615", password: "dham@123" },
+    { name: "kumar", phone: "9994176618", password: "kuma@123" },
+    { name: "Muthusamy", phone: "9894873780", password: "muth@123" },
+    { name: "Sridhar", phone: "7373463799", password: "srid@123" },
+    { name: "Prakaash Prakalathan", phone: "9944996035", password: "prak@123" },
+    { name: "Alagarsamy", phone: "8072003412", password: "alag@123" },
+  ];
+  for (const e of mobileExecutives) {
+    await prisma.user.create({
+      data: {
+        name: e.name,
+        email: `phone_${e.phone}@shaabi.local`,
+        phone: e.phone,
+        passwordHash: await bcrypt.hash(e.password, 12),
+        role: Role.EXECUTIVE,
+      },
+    });
+  }
+
   const executives = await Promise.all([
     prisma.user.create({
       data: {
@@ -399,14 +450,18 @@ async function main() {
 
   console.log("✅ Seed complete!");
   console.log("\n📊 Summary:");
-  console.log(`   Users: 1 admin + 3 executives`);
+  console.log(`   Users: 1 super admin + 3 admins + ${3 + mobileExecutives.length} executives`);
   console.log(`   Clients: ${clients.length}`);
   console.log(`   Visits: ${visitConfigs.length} (with 6 tasks each)`);
   console.log("\n🔐 Login Credentials:");
-  console.log("   Admin   → prince@smcaudit.com / Password@123");
-  console.log("   Exec 1  → alagarsamy@smcaudit.com / Password@123");
-  console.log("   Exec 2  → logesh@smcaudit.com / Password@123");
-  console.log("   Exec 3  → karthick@smcaudit.com / Password@123");
+  console.log("   Super Admin → Crita@smc.com / Access@Crita123");
+  console.log("   Admin       → prince@smcaudit.com / Password@123");
+  console.log("   Admin       → md@shaabi.net / mura@123");
+  console.log("   Admin       → admin@shaabi.net / selv@123");
+  console.log("   Exec (email)  → alagarsamy@smcaudit.com / Password@123");
+  console.log("   Exec (email)  → logesh@smcaudit.com / Password@123");
+  console.log("   Exec (email)  → karthick@smcaudit.com / Password@123");
+  console.log("   Exec (mobile) → see mobileExecutives list in this file for phone/password pairs");
 }
 
 main()

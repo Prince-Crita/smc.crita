@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth/middleware";
+import { isAdminRole } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/prisma";
 import { getApprovedLeave } from "@/lib/utils/leave-check";
 import {
@@ -23,7 +24,7 @@ export async function POST(
   { params }: { params: Promise<{ visitId: string }> }
 ) {
   const user = await getAuthUser(request);
-  if (!user || (user.role !== "ADMIN" && user.role !== "EXECUTIVE")) {
+  if (!user || (!isAdminRole(user.role) && user.role !== "EXECUTIVE")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

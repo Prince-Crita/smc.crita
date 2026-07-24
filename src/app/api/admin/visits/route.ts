@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth/middleware";
+import { isAdminRole } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/prisma";
 import { getSubtaskTotals } from "@/lib/utils/visit-status";
 import { getApprovedLeave } from "@/lib/utils/leave-check";
@@ -10,7 +11,7 @@ import { resolveClientTaskPlan, createTasksWithSubtasks } from "@/lib/utils/crea
 // GET /api/admin/visits - All visits with filters
 export async function GET(request: NextRequest) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN") {
+  if (!user || !isAdminRole(user.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -107,7 +108,7 @@ export async function GET(request: NextRequest) {
 // --- POST /api/admin/visits -- Create a new visit ------------------------------
 export async function POST(request: NextRequest) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN") {
+  if (!user || !isAdminRole(user.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

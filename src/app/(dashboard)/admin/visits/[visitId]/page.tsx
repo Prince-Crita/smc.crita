@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect, notFound } from "next/navigation";
 import { verifyJwt, COOKIE_NAME } from "@/lib/auth/jwt";
+import { isAdminRole } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/prisma";
 import { formatDate, formatDateTime, getStatusColor, getProgressColor, getRatingColor } from "@/lib/utils/utils";
 import { cn } from "@/lib/utils/utils";
@@ -13,7 +14,7 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
   const token = cookieStore.get(COOKIE_NAME)?.value;
   if (!token) redirect("/login");
   const user = await verifyJwt(token);
-  if (!user || user.role !== "ADMIN") redirect("/login");
+  if (!user || !isAdminRole(user.role)) redirect("/login");
 
   const { visitId } = await params;
 

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/middleware";
+import { isAdminRole } from "@/lib/auth/roles";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!user || !isAdminRole(user.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { id } = await params;
 
@@ -59,7 +60,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!user || !isAdminRole(user.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { id } = await params;
 
@@ -98,6 +99,75 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ executive: safeExec });
   } catch (error) {
     console.error("Update executive error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+// ─── DELETE /api/admin/executives/[id] ────────────────────────────────────────
+// Permanently deletes an executive. Only allowed when the executive has zero
+// footprint (no visits ever, no assigned clients, no attendance/leave/activity
+// history) — Visit.executiveId and similar FKs are required and have no
+// cascade-delete from User, so any history would otherwise block the delete
+// at the database level anyway.
+
+const BLOCKED_MESSAGE = "Reassign clients and upcoming visits before deleting this executive.";
+
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const user = await getAuthUser(request);
+  if (!user || !isAdminRole(user.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const { id } = await params;
+
+  try {
+    const existing = await prisma.user.findUnique({ where: { id, role: "EXECUTIVE" } });
+    if (!existing) return NextResponse.json({ error: "Executive not found" }, { status: 404 });
+
+    const [
+      visitCount,
+      clientCount,
+      attendanceCount,
+      leaveCount,
+      reassignFromCount,
+      reassignToCount,
+      reassignByCount,
+      delegationFromCount,
+      delegationToCount,
+      activityLogCount,
+    ] = await Promise.all([
+      prisma.visit.count({ where: { executiveId: id } }),
+      prisma.client.count({ where: { assignedExecId: id } }),
+      prisma.attendance.count({ where: { executiveId: id } }),
+      prisma.leaveRequest.count({ where: { executiveId: id } }),
+      prisma.visitReassignment.count({ where: { fromExecutiveId: id } }),
+      prisma.visitReassignment.count({ where: { toExecutiveId: id } }),
+      prisma.visitReassignment.count({ where: { reassignedById: id } }),
+      prisma.visitDelegation.count({ where: { fromExecutiveId: id } }),
+      prisma.visitDelegation.count({ where: { toExecutiveId: id } }),
+      prisma.activityLog.count({ where: { userId: id } }),
+    ]);
+
+    const hasFootprint =
+      visitCount > 0 || clientCount > 0 || attendanceCount > 0 || leaveCount > 0 ||
+      reassignFromCount > 0 || reassignToCount > 0 || reassignByCount > 0 ||
+      delegationFromCount > 0 || delegationToCount > 0 || activityLogCount > 0;
+
+    if (hasFootprint) {
+      return NextResponse.json({ error: BLOCKED_MESSAGE }, { status: 409 });
+    }
+
+    await prisma.user.delete({ where: { id } });
+
+    await prisma.activityLog.create({
+      data: {
+        userId: user.userId,
+        action: "EXECUTIVE_DELETED",
+        metadata: { executiveId: id, executiveName: existing.name, deletedBy: user.name },
+      },
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Delete executive error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

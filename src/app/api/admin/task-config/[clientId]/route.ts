@@ -28,6 +28,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/middleware";
+import { isAdminRole } from "@/lib/auth/roles";
 import {
   DEFAULT_TASK_TYPES,
   DEFAULT_TASK_TYPE_SET,
@@ -43,7 +44,7 @@ export async function GET(
   { params }: { params: Promise<{ clientId: string }> }
 ) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!user || !isAdminRole(user.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { clientId } = await params;
 
@@ -186,7 +187,7 @@ export async function POST(
   { params }: { params: Promise<{ clientId: string }> }
 ) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!user || !isAdminRole(user.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { clientId } = await params;
 
@@ -258,7 +259,7 @@ export async function PATCH(
   { params }: { params: Promise<{ clientId: string }> }
 ) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!user || !isAdminRole(user.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { clientId } = await params;
 
@@ -340,7 +341,7 @@ export async function DELETE(
   { params }: { params: Promise<{ clientId: string }> }
 ) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!user || !isAdminRole(user.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { clientId } = await params;
   const { searchParams } = new URL(request.url);

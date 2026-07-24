@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/middleware";
+import { isAdminRole } from "@/lib/auth/roles";
 import { getSubtaskTotals } from "@/lib/utils/visit-status";
 import { runCarryForwardMaintenance, isCarryForwardVisit } from "@/lib/utils/carry-forward";
 
@@ -9,7 +10,7 @@ import { runCarryForwardMaintenance, isCarryForwardVisit } from "@/lib/utils/car
 
 export async function GET(request: NextRequest) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN")
+  if (!user || !isAdminRole(user.role))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {

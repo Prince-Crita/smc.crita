@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/middleware";
+import { isAdminRole } from "@/lib/auth/roles";
 import bcrypt from "bcryptjs";
 
 // ─── GET /api/admin/executives ────────────────────────────────────────────────
@@ -8,7 +9,7 @@ import bcrypt from "bcryptjs";
 
 export async function GET(request: NextRequest) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN")
+  if (!user || !isAdminRole(user.role))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
@@ -103,7 +104,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const user = await getAuthUser(request);
-  if (!user || user.role !== "ADMIN")
+  if (!user || !isAdminRole(user.role))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {

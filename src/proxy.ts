@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { verifyJwt, COOKIE_NAME } from "@/lib/auth/jwt";
+import { isAdminRole } from "@/lib/auth/roles";
 
 const PUBLIC_PATHS = ["/login", "/api/auth/login"];
 
@@ -28,7 +29,7 @@ export async function proxy(request: NextRequest) {
 
   // Role-based redirect from root
   if (pathname === "/") {
-    if (payload.role === "ADMIN") {
+    if (isAdminRole(payload.role)) {
       return NextResponse.redirect(new URL("/admin", request.url));
     } else {
       return NextResponse.redirect(new URL("/executive", request.url));
@@ -36,7 +37,7 @@ export async function proxy(request: NextRequest) {
   }
 
   // Admin route protection
-  if (pathname.startsWith("/admin") && payload.role !== "ADMIN") {
+  if (pathname.startsWith("/admin") && !isAdminRole(payload.role)) {
     return NextResponse.redirect(new URL("/executive", request.url));
   }
 
