@@ -4,8 +4,10 @@ import { Modal } from "@/components/ui/Modal";
 import { Badge, ProgressBadge } from "@/components/ui/Badge";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { SkeletonCard, SkeletonTable } from "@/components/ui/Skeleton";
-import { Building2, Mail, Phone, Users, CheckCircle2, Clock, TrendingUp, RotateCcw, Activity } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { Building2, Mail, Phone, Users, CheckCircle2, Clock, TrendingUp, RotateCcw, Activity, X } from "lucide-react";
 import { formatDate, formatTimeAgo } from "@/lib/utils/utils";
+import toast from "react-hot-toast";
 
 interface Executive {
   id: string; name: string; email: string; phone?: string | null; isActive: boolean; createdAt: string;
@@ -18,6 +20,8 @@ interface Executive {
 interface ExecutiveDetailModalProps {
   executiveId: string | null;
   onClose: () => void;
+  /** Called after a visit is successfully removed, so the caller can refresh the executives list/dashboard. */
+  onVisitRemoved?: () => void;
 }
 
 const ACTION_LABELS: Record<string, string> = {
@@ -25,10 +29,11 @@ const ACTION_LABELS: Record<string, string> = {
   TASK_COMPLETED: "Completed task", SUBTASK_COMPLETED: "Completed subtask", CARRY_FORWARD_APPLIED: "Carry-forward applied",
 };
 
-export function ExecutiveDetailModal({ executiveId, onClose }: ExecutiveDetailModalProps) {
+export function ExecutiveDetailModal({ executiveId, onClose, onVisitRemoved }: ExecutiveDetailModalProps) {
   const [exec, setExec] = useState<Executive | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"visits" | "activity">("visits");
+  const [removeTarget, setRemoveTarget] = useState<{ id: string; clientName: string; visitNumber: string } | null>(null);
 
   const fetchExec = useCallback(async () => {
     if (!executiveId) return;
@@ -47,6 +52,21 @@ export function ExecutiveDetailModal({ executiveId, onClose }: ExecutiveDetailMo
   useEffect(() => {
     if (executiveId) { setExec(null); setActiveTab("visits"); fetchExec(); }
   }, [executiveId, fetchExec]);
+
+  const confirmRemoveVisit = async () => {
+    if (!removeTarget) return;
+    try {
+      const res = await fetch(`/api/admin/visits/${removeTarget.id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(data.error || "Failed to remove visit"); return; }
+      toast.success("Visit removed");
+      setRemoveTarget(null);
+      await fetchExec();
+      onVisitRemoved?.();
+    } catch {
+      toast.error("Error removing visit");
+    }
+  };
 
   return (
     <Modal isOpen={!!executiveId} onClose={onClose} title="Executive Profile" size="xl">
@@ -144,6 +164,15 @@ export function ExecutiveDetailModal({ executiveId, onClose }: ExecutiveDetailMo
                       <div className="mt-1.5"><ProgressBar value={v.progress} size="sm" /></div>
                       <p className="text-xs text-[#8896a9] mt-1">{formatDate(new Date(v.scheduledDate))}{v.closedAt && ` · Closed ${formatDate(new Date(v.closedAt))}`}</p>
                     </div>
+                    {v.status !== "CLOSED" && (
+                      <button
+                        onClick={() => setRemoveTarget({ id: v.id, clientName: v.client.name, visitNumber: v.visitNumber })}
+                        className="p-2 rounded-lg bg-white border border-[#e2e7f0] text-[#8896a9] hover:text-red-600 hover:bg-red-50 hover:border-red-200 transition-all press-effect flex-shrink-0"
+                        title="Remove Visit"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -177,6 +206,22 @@ export function ExecutiveDetailModal({ executiveId, onClose }: ExecutiveDetailMo
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        isOpen={!!removeTarget}
+        title="Remove Visit"
+        message={
+          <>
+            Remove visit <strong className="text-[#0f1829]">{removeTarget?.visitNumber}</strong> for{" "}
+            <strong className="text-[#0f1829]">&quot;{removeTarget?.clientName}&quot;</strong> from this executive?
+            This unassigns and permanently deletes the visit record. This action cannot be undone.
+          </>
+        }
+        confirmLabel="Remove Visit"
+        danger
+        onConfirm={confirmRemoveVisit}
+        onCancel={() => setRemoveTarget(null)}
+      />
     </Modal>
   );
 }

@@ -327,7 +327,7 @@ export default function ExecutivesPage() {
       {editExec && (
         <AddExecutiveModal executive={editExec} onClose={() => setEditExec(null)} onSuccess={fetchExecutives} />
       )}
-      <ExecutiveDetailModal executiveId={detailExecId} onClose={() => setDetailExecId(null)} />
+      <ExecutiveDetailModal executiveId={detailExecId} onClose={() => setDetailExecId(null)} onVisitRemoved={fetchExecutives} />
 
       {/* Reset Password Modal */}
       <Modal isOpen={!!resetExec} onClose={() => setResetExec(null)} title="Reset Password" size="sm">
