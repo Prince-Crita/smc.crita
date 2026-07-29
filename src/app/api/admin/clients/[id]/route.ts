@@ -60,6 +60,14 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const execChanged = assignedExecId !== undefined && newExecId !== prevExecId;
     const execAssigned = execChanged && !!newExecId;
 
+    // Resolve the effective visit start/end dates for this save (used below to
+    // keep the client's active visit in sync with the Start/End Date fields).
+    const newStartDate = startDate !== undefined ? (startDate ? new Date(startDate) : null) : existing.startDate;
+    const newEndDate = endDate !== undefined ? (endDate ? new Date(endDate) : null) : existing.endDate;
+    const datesChanged =
+      (startDate !== undefined && (existing.startDate?.getTime() ?? null) !== (newStartDate?.getTime() ?? null)) ||
+      (endDate !== undefined && (existing.endDate?.getTime() ?? null) !== (newEndDate?.getTime() ?? null));
+
     const updated = await prisma.client.update({
       where: { id },
       data: {
@@ -91,14 +99,72 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       },
     });
 
-    // If a new executive was just assigned, auto-create a Visit for them
+    // ── Sync the client's active visit with the new executive / dates ────────
+    // A client has at most one active (PENDING/OPEN) visit at a time. When the
+    // assigned executive or the Start/End Date changes, that SAME visit row
+    // must be updated in place — never left on the old executive while a
+    // second visit is created for the new one (that produced the "both
+    // executives own the visit" duplication bug + wrong visit date bug).
     let visitInfo = null;
     let visitError: string | null = null;
-    if (execAssigned) {
+    if (execAssigned || (datesChanged && newExecId)) {
       try {
-        visitInfo = await createVisitForClient(id, newExecId!, user.userId);
+        const activeVisits = await prisma.visit.findMany({
+          where: { clientId: id, status: { in: ["PENDING", "OPEN"] } },
+          include: { executive: { select: { id: true, name: true } } },
+        });
+
+        if (activeVisits.length > 0) {
+          for (const visit of activeVisits) {
+            const reassigning = execChanged && !!newExecId && visit.executiveId !== newExecId;
+
+            await prisma.visit.update({
+              where: { id: visit.id },
+              data: {
+                ...(reassigning ? { executiveId: newExecId! } : {}),
+                ...(newStartDate ? { scheduledDate: newStartDate } : {}),
+                ...(endDate !== undefined ? { endDate: newEndDate } : {}),
+              },
+            });
+
+            if (reassigning) {
+              await prisma.visitReassignment.create({
+                data: {
+                  visitId: visit.id,
+                  fromExecutiveId: visit.executiveId,
+                  toExecutiveId: newExecId!,
+                  reason: "Client executive assignment changed",
+                  reassignedById: user.userId,
+                },
+              });
+              await prisma.activityLog.create({
+                data: {
+                  visitId: visit.id,
+                  userId: user.userId,
+                  action: "VISIT_REASSIGNED",
+                  metadata: {
+                    visitNumber: visit.visitNumber,
+                    clientName: updated.name,
+                    fromExecutiveId: visit.executiveId,
+                    fromExecutiveName: visit.executive.name,
+                    toExecutiveId: newExecId,
+                    reassignedBy: user.name,
+                    reason: "Client executive assignment changed",
+                  },
+                },
+              });
+            }
+          }
+          visitInfo = { visitsSynced: activeVisits.length };
+        } else if (execAssigned) {
+          // No active visit exists yet — create one on the correct date
+          visitInfo = await createVisitForClient(id, newExecId!, user.userId, {
+            scheduledDate: newStartDate ?? undefined,
+            endDate: newEndDate ?? undefined,
+          });
+        }
       } catch (visitErr) {
-        console.error("[create-visit] Failed to auto-create visit after exec assignment:", visitErr);
+        console.error("[create-visit] Failed to sync visit after client update:", visitErr);
         visitError = visitErr instanceof Error ? visitErr.message : String(visitErr);
       }
     }

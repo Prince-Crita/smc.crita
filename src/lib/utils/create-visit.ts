@@ -315,6 +315,8 @@ export async function syncAfterTemplateChange(clientId: string | null): Promise<
 export interface CreateVisitForClientOptions {
   /** Defaults to now(). Lets carry-forward flows schedule on a specific date/time. */
   scheduledDate?: Date;
+  /** End of the visit's working window (defaults to null — see Visit.endDate doc). */
+  endDate?: Date;
   /** Stored verbatim on the created Visit (e.g. a carry-forward marker). */
   notes?: string;
   /**
@@ -334,7 +336,7 @@ export async function createVisitForClient(
   adminUserId: string,
   options: CreateVisitForClientOptions = {}
 ): Promise<{ visitId: string; visitNumber: string }> {
-  const { scheduledDate, notes, skipActiveDuplicateGuard } = options;
+  const { scheduledDate, endDate, notes, skipActiveDuplicateGuard } = options;
 
   // ── Guard: don't create duplicate pending/open visits ────────────────────
   if (!skipActiveDuplicateGuard) {
@@ -390,6 +392,7 @@ export async function createVisitForClient(
       executiveId,
       status:        "PENDING",
       scheduledDate: scheduledDate ?? now,
+      endDate:       endDate ?? null,
       notes:         notes ?? null,
     },
   });

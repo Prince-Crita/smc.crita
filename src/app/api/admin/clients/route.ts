@@ -132,7 +132,10 @@ export async function POST(request: NextRequest) {
     let visitError: string | null = null;
     if (assignedExecId) {
       try {
-        visitInfo = await createVisitForClient(client.id, assignedExecId, user.userId);
+        visitInfo = await createVisitForClient(client.id, assignedExecId, user.userId, {
+          scheduledDate: client.startDate ?? undefined,
+          endDate: client.endDate ?? undefined,
+        });
       } catch (visitErr) {
         console.error("[create-visit] Failed to auto-create visit after client creation:", visitErr);
         visitError = visitErr instanceof Error ? visitErr.message : String(visitErr);
