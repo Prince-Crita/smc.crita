@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { isAdminRole } from "@/lib/auth/roles";
+import { getSubtaskTotals } from "@/lib/utils/visit-status";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getAuthUser(request);
@@ -27,12 +28,22 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     if (!exec) return NextResponse.json({ error: "Executive not found" }, { status: 404 });
 
+    // Status via the shared helper so this modal agrees with the dashboard,
+    // visit list and calendar (it previously derived status from subtask
+    // progress alone, ignoring visit.status).
     const visits = exec.assignedVisits.map((v: any) => {
-      const total = v.tasks.reduce((s, t) => s + t.subtasks.length, 0);
-      const done = v.tasks.reduce((s, t) => s + t.subtasks.filter((st) => st.isCompleted).length, 0);
-      const cfCount = v.tasks.reduce((s, t) => s + t.subtasks.filter((st) => st.isCarriedForward).length, 0);
-      const progress = total === 0 ? 0 : Math.round((done / total) * 100);
-      return { id: v.id, visitNumber: v.visitNumber, client: v.client, status: v.status, scheduledDate: v.scheduledDate, closedAt: v.closedAt, progress, carryForwardCount: cfCount };
+      const { carryForwardCount, progress, displayStatus } = getSubtaskTotals(v.tasks, v.status);
+      return {
+        id: v.id,
+        visitNumber: v.visitNumber,
+        client: v.client,
+        status: v.status,
+        displayStatus,
+        scheduledDate: v.scheduledDate,
+        closedAt: v.closedAt,
+        progress,
+        carryForwardCount,
+      };
     });
 
     const uniqueClients = Array.from(new Map(visits.map((v) => [v.client.id, v.client])).values());
@@ -45,9 +56,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         assignedClients: uniqueClients,
         stats: {
           totalVisits: visits.length,
-          pendingCount: visits.filter((v) => v.progress === 0).length,
-          inProgressCount: visits.filter((v) => v.progress > 0 && v.progress < 100).length,
-          closedCount: visits.filter((v) => v.progress === 100).length,
+          pendingCount: visits.filter((v) => v.displayStatus === "PENDING").length,
+          inProgressCount: visits.filter((v) => v.displayStatus === "IN_PROGRESS").length,
+          closedCount: visits.filter((v) => v.displayStatus === "CLOSED").length,
           carryForwardCount: visits.reduce((s, v) => s + v.carryForwardCount, 0),
         },
       },

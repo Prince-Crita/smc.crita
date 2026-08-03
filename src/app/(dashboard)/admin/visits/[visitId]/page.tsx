@@ -4,6 +4,7 @@ import { verifyJwt, COOKIE_NAME } from "@/lib/auth/jwt";
 import { isAdminRole } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/prisma";
 import { formatDate, formatDateTime, getStatusColor, getProgressColor, getRatingColor } from "@/lib/utils/utils";
+import { calculateDisplayStatus, DISPLAY_STATUS_LABELS } from "@/lib/utils/visit-status";
 import { cn } from "@/lib/utils/utils";
 import Link from "next/link";
 import { ArrowLeft, Building2, CheckCircle2, XCircle, RotateCcw, FileText, User, Calendar, Clock } from "lucide-react";
@@ -46,6 +47,10 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
   0
 );
   const progress = totalSubtasks === 0 ? 0 : Math.round((completedSubtasks / totalSubtasks) * 100);
+  // Same progress-aware status the visit list, dashboards and calendar show.
+  // Rendering the raw DB status here made one visit read "In Progress" on this
+  // page while every other page already called it "Closed".
+  const displayStatus = calculateDisplayStatus(completedSubtasks, totalSubtasks, visit.status);
   const summary = visit.summaryJson as {
   overallRating?: string;
 } | null;
@@ -64,8 +69,8 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="text-xs font-mono text-slate-500">{visit.visitNumber}</span>
-              <span className={cn("px-2.5 py-0.5 rounded-full text-xs font-medium border", getStatusColor(visit.status))}>
-                {visit.status === "OPEN" ? "In Progress" : visit.status.charAt(0) + visit.status.slice(1).toLowerCase()}
+              <span className={cn("px-2.5 py-0.5 rounded-full text-xs font-medium border", getStatusColor(displayStatus))}>
+                {DISPLAY_STATUS_LABELS[displayStatus]}
               </span>
             </div>
             <h1 className="text-xl font-bold text-white">{visit.client.name}</h1>

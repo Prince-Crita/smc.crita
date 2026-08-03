@@ -866,6 +866,11 @@ export default function VisitDetailPage() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span className="text-xs font-mono text-[#25488e] bg-[#eef2fb] px-2 py-0.5 rounded-md border border-[#d4ddf5]">{visit.visitNumber}</span>
+              {/* Deliberately keyed to the RAW workflow status, not the shared
+                  displayStatus: on this screen the badge labels the exact state
+                  the Open Visit / Close Visit buttons below act on. A visit at
+                  100% subtasks that has not been formally closed yet still needs
+                  the executive to close it, so it must read "In Progress" here. */}
               <span className={cn(
                 "px-2 py-0.5 rounded-full text-xs font-semibold border",
                 visit.status === "OPEN"

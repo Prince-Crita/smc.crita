@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { isAdminRole } from "@/lib/auth/roles";
+import { getSubtaskTotals } from "@/lib/utils/visit-status";
 import bcrypt from "bcryptjs";
 
 // ─── GET /api/admin/executives ────────────────────────────────────────────────
@@ -27,12 +28,13 @@ export async function GET(request: NextRequest) {
         assignedVisits: {
           select: {
             id: true,
+            status: true,
             scheduledDate: true,
             client: { select: { id: true, name: true } },
             tasks: {
               select: {
                 subtasks: {
-                  select: { isCompleted: true },
+                  select: { isCompleted: true, isCarriedForward: true },
                 },
               },
             },
@@ -55,22 +57,21 @@ export async function GET(request: NextRequest) {
         // Build unique client set
         clientMap.set(visit.client.id, visit.client);
 
-        // Compute progress inline — no extra DB call
-        const total = visit.tasks.reduce((s, t) => s + t.subtasks.length, 0);
-        const done  = visit.tasks.reduce(
-          (s, t) => s + t.subtasks.filter((st) => st.isCompleted).length,
-          0
-        );
-        const progress = total === 0 ? 0 : Math.round((done / total) * 100);
+        // Compute status inline — no extra DB call — but through the SAME
+        // shared helper every other screen uses. This used to derive status
+        // from subtask progress alone and ignore visit.status, so a visit
+        // formally closed at e.g. 83% was counted "in progress" here while
+        // the dashboard, visit list and calendar all called it "closed".
+        const { displayStatus } = getSubtaskTotals(visit.tasks, visit.status);
 
-        if (progress === 0) pendingCount++;
-        else if (progress < 100) inProgressCount++;
+        if (displayStatus === "PENDING") pendingCount++;
+        else if (displayStatus === "IN_PROGRESS") inProgressCount++;
         else closedCount++;
 
         // Missed = overdue visit not yet closed
         if (
           new Date(visit.scheduledDate ?? Date.now()) < now &&
-          progress < 100
+          displayStatus !== "CLOSED"
         ) {
           missedCount++;
         }

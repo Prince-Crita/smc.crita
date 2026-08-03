@@ -11,7 +11,7 @@ import toast from "react-hot-toast";
 
 interface Executive {
   id: string; name: string; email: string; phone?: string | null; isActive: boolean; createdAt: string;
-  visits: { id: string; visitNumber: string; client: { name: string; code: string }; status: string; scheduledDate: string; closedAt?: string | null; progress: number }[];
+  visits: { id: string; visitNumber: string; client: { name: string; code: string }; status: string; displayStatus?: "PENDING" | "IN_PROGRESS" | "CLOSED"; scheduledDate: string; closedAt?: string | null; progress: number }[];
   activityLogs: { id: string; action: string; metadata: Record<string, unknown>; createdAt: string }[];
   assignedClients: { id: string; name: string }[];
   stats: { totalVisits: number; pendingCount: number; inProgressCount: number; closedCount: number; carryForwardCount: number };
@@ -159,7 +159,7 @@ export function ExecutiveDetailModal({ executiveId, onClose, onVisitRemoved }: E
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-medium text-[#0f1829]">{v.client.name}</span>
                         <span className="text-xs text-[#8896a9] font-mono">{v.visitNumber}</span>
-                        <ProgressBadge progress={v.progress} />
+                        <ProgressBadge progress={v.progress} displayStatus={v.displayStatus} />
                       </div>
                       <div className="mt-1.5"><ProgressBar value={v.progress} size="sm" /></div>
                       <p className="text-xs text-[#8896a9] mt-1">{formatDate(new Date(v.scheduledDate))}{v.closedAt && ` · Closed ${formatDate(new Date(v.closedAt))}`}</p>

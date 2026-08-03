@@ -23,6 +23,25 @@ export async function GET(request: NextRequest) {
     // not to the raw DB visit.status field - we filter in-memory after progress calculation
     const displayStatusFilter = searchParams.get("status");
 
+    // ?meta=1 → only the client + executive dropdown options. The admin
+    // Calendar page needs nothing else from this endpoint, and was otherwise
+    // pulling EVERY visit with all of its tasks and subtasks on each load
+    // purely to populate two <select>s.
+    if (searchParams.get("meta") === "1") {
+      const [clients, executives] = await Promise.all([
+        prisma.client.findMany({
+          select: { id: true, name: true, code: true },
+          orderBy: { name: "asc" },
+        }),
+        prisma.user.findMany({
+          where: { role: "EXECUTIVE" },
+          select: { id: true, name: true },
+          orderBy: { name: "asc" },
+        }),
+      ]);
+      return NextResponse.json({ visits: [], clients, executives, stats: { total: 0, pending: 0, inProgress: 0, closed: 0 } });
+    }
+
     const where: Record<string, unknown> = {};
     if (clientId) where.clientId = clientId;
     if (executiveId) where.executiveId = executiveId;

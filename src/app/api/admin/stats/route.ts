@@ -4,6 +4,7 @@ import { getAuthUser } from "@/lib/auth/middleware";
 import { isAdminRole } from "@/lib/auth/roles";
 import { getSubtaskTotals } from "@/lib/utils/visit-status";
 import { runCarryForwardMaintenance, isCarryForwardVisit } from "@/lib/utils/carry-forward";
+import { toMidnightIST } from "@/lib/utils/attendance";
 
 // --- GET /api/admin/stats ------------------------------------------------------
 // Optimized: single DB query, carry-forward + overdue computed from in-memory data
@@ -20,27 +21,45 @@ export async function GET(request: NextRequest) {
 
     const now = new Date();
 
-    const allVisits = await prisma.visit.findMany({
-      select: {
-        id:            true,
-        visitNumber:   true,
-        status:        true,
-        scheduledDate: true,
-        openedAt:      true,
-        closedAt:      true,
-        notes:         true,
-        client:    { select: { id: true, name: true, code: true } },
-        executive: { select: { id: true, name: true, email: true } },
-        tasks: {
-          select: {
-            taskType: true,
-            mdMeetingAnswer: true,
-            subtasks: { select: { isCompleted: true, isCarriedForward: true } },
+    // ── Today's IST calendar-day window ───────────────────────────────────
+    // Everything in the `today` block below is computed strictly inside
+    // [todayStart, todayEnd) — the business day the admin is looking at.
+    // Attendance/leave already key off IST midnight (see attendance.ts), so
+    // the same boundary is reused here for a single consistent "today".
+    const todayStart = toMidnightIST(now);
+    const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+
+    const [allVisits, todayLeaveCount] = await Promise.all([
+      prisma.visit.findMany({
+        select: {
+          id:            true,
+          visitNumber:   true,
+          status:        true,
+          scheduledDate: true,
+          endDate:       true,
+          openedAt:      true,
+          closedAt:      true,
+          notes:         true,
+          client:    { select: { id: true, name: true, code: true } },
+          executive: { select: { id: true, name: true, email: true } },
+          tasks: {
+            select: {
+              taskType: true,
+              mdMeetingAnswer: true,
+              subtasks: { select: { isCompleted: true, isCarriedForward: true } },
+            },
           },
         },
-      },
-      orderBy: { updatedAt: "desc" },
-    });
+        orderBy: { updatedAt: "desc" },
+      }),
+      // Leave requests RAISED today that still await an admin decision.
+      // (LeaveRequest.date is always a future date — the executive leave form
+      // enforces min = tomorrow — so "today's leave requests" can only mean
+      // the ones submitted today.)
+      prisma.leaveRequest.count({
+        where: { status: "PENDING", createdAt: { gte: todayStart, lt: todayEnd } },
+      }),
+    ]);
 
     let totalCarryForward = 0;
     // Reuses the exact "[Rescheduled:" marker convention written by
@@ -75,6 +94,22 @@ export async function GET(request: NextRequest) {
       const isOverdue =
         new Date(v.scheduledDate) < now && displayStatus !== "CLOSED";
 
+      // ── "Is this today's visit?" ──────────────────────────────────────
+      // A visit occupies the window [scheduledDate .. endDate] (endDate is
+      // optional and defaults to the scheduled day itself — see the Visit
+      // model doc). It belongs to TODAY when that window overlaps today's
+      // IST calendar day, which is exactly the rule the calendar and the
+      // executive's visit list already work by.
+      const startsAt = new Date(v.scheduledDate);
+      const endsAt = v.endDate ? new Date(v.endDate) : startsAt;
+      const isToday = startsAt < todayEnd && endsAt >= todayStart;
+
+      // Closed TODAY (the closedAt instant falls inside today's IST day) —
+      // this is what "Today's Completed" must count, not "closed at any
+      // point in the past".
+      const closedToday =
+        !!v.closedAt && new Date(v.closedAt) >= todayStart && new Date(v.closedAt) < todayEnd;
+
       return {
         id: v.id,
         visitNumber: v.visitNumber,
@@ -91,6 +126,9 @@ export async function GET(request: NextRequest) {
         carryForwardCount,
         hasCarryForward,
         isOverdue,
+        isToday,
+        closedToday,
+        mdMeetingNo,
       };
     });
 
@@ -99,7 +137,31 @@ export async function GET(request: NextRequest) {
     const closedVisits     = withProgress.filter((v) => v.displayStatus === "CLOSED");
     const overdueVisits    = withProgress.filter((v) => v.isOverdue);
 
+    // ── TODAY-ONLY counters (drive the "Today's Alerts" panel) ────────────
+    // Every counter below is derived from `isToday` / `closedToday`, so no
+    // previous or future date can leak into the panel.
+    const todayVisits = withProgress.filter((v) => v.isToday);
+    const todaySummary = {
+      total:             todayVisits.length,
+      pendingCount:      todayVisits.filter((v) => v.displayStatus === "PENDING").length,
+      inProgressCount:   todayVisits.filter((v) => v.displayStatus === "IN_PROGRESS").length,
+      // Completed today = the visit was actually closed during today's IST
+      // day (a visit closed last week is not "today's completed").
+      completedCount:    withProgress.filter((v) => v.closedToday).length,
+      // Missed today = due today (or earlier, still inside today's window)
+      // and past its scheduled start while still not closed — the same
+      // overdue rule used everywhere else, scoped to today.
+      missedCount:       todayVisits.filter((v) => v.isOverdue).length,
+      carryForwardCount: todayVisits.reduce(
+        (s, v) => s + (v.carryForwardCount > 0 ? v.carryForwardCount : v.hasCarryForward ? 1 : 0),
+        0
+      ),
+      mdMeetingNoCount:  withProgress.filter((v) => v.closedToday && v.mdMeetingNo).length,
+      leaveRequestCount: todayLeaveCount,
+    };
+
     return NextResponse.json({
+      today: todaySummary,
       summary: {
         total:             allVisits.length,
         pendingCount:      pendingVisits.length,

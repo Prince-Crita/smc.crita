@@ -36,11 +36,37 @@ export function Badge({
   );
 }
 
-export function ProgressBadge({ progress }: { progress: number }) {
+/**
+ * ProgressBadge
+ * -------------------------------------------------------------------------
+ * Shows "<status> · <progress>%".
+ *
+ * `displayStatus` (the value produced by lib/utils/visit-status) MUST be
+ * passed whenever it is available. Deriving the status from the percentage
+ * alone — which is all this component used to do — mislabels the two cases
+ * the visit-status helper exists to handle:
+ *   • a visit formally CLOSED at e.g. 83% rendered "In Progress · 83%"
+ *   • a visit closed with zero completed subtasks rendered "Pending · 0%"
+ * That is the "completed visits still show as Pending" report. The
+ * percentage-only path below is kept only as a fallback for callers that
+ * genuinely have no status to hand.
+ */
+export function ProgressBadge({
+  progress,
+  displayStatus,
+}: {
+  progress: number;
+  displayStatus?: "PENDING" | "IN_PROGRESS" | "CLOSED";
+}) {
+  const resolved =
+    displayStatus ??
+    (progress === 0 ? "PENDING" : progress === 100 ? "CLOSED" : "IN_PROGRESS");
+
   const variant: BadgeVariant =
-    progress === 0 ? "pending" : progress === 100 ? "closed" : "inprogress";
+    resolved === "PENDING" ? "pending" : resolved === "CLOSED" ? "closed" : "inprogress";
   const label =
-    progress === 0 ? "Pending" : progress === 100 ? "Closed" : "In Progress";
+    resolved === "PENDING" ? "Pending" : resolved === "CLOSED" ? "Closed" : "In Progress";
+
   return (
     <Badge variant={variant}>
       {label} · {progress}%

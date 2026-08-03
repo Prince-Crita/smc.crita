@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Users, Clock, AlertCircle, RefreshCw, CalendarDays, TrendingUp } from "lucide-react";
+import { Users, Clock, AlertCircle, RefreshCw, CalendarDays, TrendingUp, MessageSquareText } from "lucide-react";
 import { cn } from "@/lib/utils/utils";
 import { SkeletonTable } from "@/components/ui/Skeleton";
+import { Modal } from "@/components/ui/Modal";
 import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -15,6 +16,8 @@ interface AttendanceRecord {
   punchOut: string | null;
   workingMinutes: number | null;
   isLate: boolean;
+  /** Optional note the executive left when punching out. */
+  notes?: string | null;
   executive: Executive;
 }
 interface AttendanceData {
@@ -31,6 +34,48 @@ function fmtTime(iso: string) {
 function fmtMinutes(min: number) {
   const h = Math.floor(min / 60), m = min % 60;
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+function fmtFullDate(iso: string) {
+  return new Date(iso).toLocaleDateString("en-IN", {
+    weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata",
+  });
+}
+
+// ─── Punch-out note popup ────────────────────────────────────────────────────
+// Opened from the small note icon next to an executive who left a note.
+function PunchOutNoteModal({
+  record,
+  onClose,
+}: {
+  record: AttendanceRecord | null;
+  onClose: () => void;
+}) {
+  if (!record) return null;
+  return (
+    <Modal isOpen onClose={onClose} title="Punch Out Note" size="sm">
+      <div className="p-5 space-y-4">
+        <div className="space-y-2.5">
+          {[
+            { label: "Executive", value: record.executive.name },
+            { label: "Date",      value: fmtFullDate(record.date) },
+            { label: "Punch In",  value: fmtTime(record.punchIn) },
+            { label: "Punch Out", value: record.punchOut ? fmtTime(record.punchOut) : "—" },
+          ].map(({ label, value }) => (
+            <div key={label} className="flex items-start justify-between gap-3">
+              <span className="text-xs text-[#8896a9] font-semibold flex-shrink-0">{label}</span>
+              <span className="text-sm text-[#0f1829] text-right">{value}</span>
+            </div>
+          ))}
+        </div>
+        <div className="pt-3 border-t border-[#f1f4f9]">
+          <p className="text-xs text-[#8896a9] font-semibold mb-1.5">Notes</p>
+          <p className="text-sm text-[#0f1829] whitespace-pre-wrap leading-relaxed bg-[#f8f9fc] border border-[#e2e7f0] rounded-lg px-3 py-2.5">
+            {record.notes}
+          </p>
+        </div>
+      </div>
+    </Modal>
+  );
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -74,6 +119,7 @@ function DailyAttendanceView() {
     () => new Date().toISOString().split("T")[0]
   );
   const [execFilter, setExecFilter] = useState("");
+  const [noteRecord, setNoteRecord] = useState<AttendanceRecord | null>(null);
 
   const fetchData = useCallback(async () => {
     const params = new URLSearchParams();
@@ -98,6 +144,8 @@ function DailyAttendanceView() {
 
   return (
     <div className="space-y-6">
+      <PunchOutNoteModal record={noteRecord} onClose={() => setNoteRecord(null)} />
+
       <div className="flex justify-end">
         <button onClick={refresh} disabled={loading}
           className="p-2 rounded-lg bg-[#f1f4f9] hover:bg-[#e2e7f0] text-[#8896a9] transition-colors disabled:opacity-50">
@@ -176,7 +224,20 @@ function DailyAttendanceView() {
                 {data!.records.map((rec) => (
                   <tr key={rec.id} className="border-b border-[#f1f4f9] hover:bg-[#f8f9fc] transition-colors">
                     <td className="px-5 py-3.5">
-                      <p className="text-sm font-semibold text-[#0f1829]">{rec.executive.name}</p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-sm font-semibold text-[#0f1829]">{rec.executive.name}</p>
+                        {rec.notes && (
+                          <button
+                            type="button"
+                            onClick={() => setNoteRecord(rec)}
+                            title="View punch-out note"
+                            aria-label={`View punch-out note from ${rec.executive.name}`}
+                            className="flex-shrink-0 p-1 rounded-md text-[#25488e] bg-[#eef2fb] border border-[#d4ddf5] hover:bg-[#d4ddf5] transition-colors press-effect"
+                          >
+                            <MessageSquareText className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                       <p className="text-xs text-[#8896a9]">{rec.executive.email}</p>
                     </td>
                     <td className="px-5 py-3.5 text-sm text-[#0f1829] tabular-nums">{fmtTime(rec.punchIn)}</td>

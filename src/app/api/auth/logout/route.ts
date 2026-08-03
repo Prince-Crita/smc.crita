@@ -16,11 +16,27 @@ export async function POST(request: NextRequest) {
       });
     }
     const response = NextResponse.json({ success: true });
-    response.cookies.delete(COOKIE_NAME);
+    // Explicit path/flags so the long-lived "Remember Me" cookie is reliably
+    // cleared — logout must always win over Remember Me.
+    response.cookies.set(COOKIE_NAME, "", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 0,
+      path: "/",
+    });
     return response;
   } catch {
     const response = NextResponse.json({ success: true });
-    response.cookies.delete(COOKIE_NAME);
+    // Explicit path/flags so the long-lived "Remember Me" cookie is reliably
+    // cleared — logout must always win over Remember Me.
+    response.cookies.set(COOKIE_NAME, "", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 0,
+      path: "/",
+    });
     return response;
   }
 }

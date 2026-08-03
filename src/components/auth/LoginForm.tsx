@@ -20,6 +20,7 @@ export default function LoginForm() {
     formState: { errors },
   } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
+    defaultValues: { rememberMe: false },
   });
 
   const onSubmit = async (data: LoginInput) => {
@@ -165,6 +166,20 @@ export default function LoginForm() {
                   <p className="mt-1.5 text-xs text-red-500">{errors.password.message}</p>
                 )}
               </div>
+
+              {/* Remember Me — extends the session to 30 days. The session is
+                  still a signed, httpOnly, Secure cookie verified server-side
+                  on every request; only its lifetime changes. */}
+              <label htmlFor="rememberMe" className="flex items-center gap-2.5 cursor-pointer select-none">
+                <input
+                  id="rememberMe"
+                  type="checkbox"
+                  {...register("rememberMe")}
+                  className="w-4 h-4 rounded border-[#c8d2e0] accent-[#25488e]"
+                />
+                <span className="text-sm text-[#4a5568]">Remember me</span>
+                <span className="text-xs text-[#8896a9] ml-auto">Stay signed in for 30 days</span>
+              </label>
 
               {/* Submit */}
               <button

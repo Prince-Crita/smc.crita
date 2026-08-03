@@ -201,7 +201,12 @@ export default function ClientsPage() {
   const [editClient, setEditClient] = useState<Client | null>(null);
   const [duplicateClient, setDuplicateClient] = useState<Client | null>(null);
   const [dupName, setDupName] = useState("");
-  const [dupVisitDate, setDupVisitDate] = useState("");
+  // Same two fields as the Edit Client popup (Client.startDate / Client.endDate)
+  // — they drive the duplicated client's engagement window AND the visit that
+  // is created from it, so no follow-up "Edit Client" is ever needed.
+  const [dupStartDate, setDupStartDate] = useState("");
+  const [dupEndDate, setDupEndDate] = useState("");
+  const [dupDateError, setDupDateError] = useState("");
   const [duplicating, setDuplicating] = useState(false);
   // Carry-forward selection step: pending tasks from the source client's
   // latest visit; the admin ticks which become Carry Forward in the copy.
@@ -299,7 +304,11 @@ export default function ClientsPage() {
   const handleDuplicateOpen = useCallback(async (client: Client) => {
     setDuplicateClient(client);
     setDupName(`${client.name} (Copy)`);
-    setDupVisitDate("");
+    // Prefill from the source client, exactly like Edit Client does — the
+    // admin usually just shifts the window forward by a week.
+    setDupStartDate(client.startDate ? new Date(client.startDate).toISOString().split("T")[0] : "");
+    setDupEndDate(client.endDate ? new Date(client.endDate).toISOString().split("T")[0] : "");
+    setDupDateError("");
     setDupSelectedTypes(new Set());
     setDupPendingTasks([]);
     setDupPendingLoading(true);
@@ -326,6 +335,14 @@ export default function ClientsPage() {
   const handleDuplicateSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!duplicateClient || !dupName.trim()) return;
+
+    // Same validation rule the visit APIs already enforce.
+    if (dupStartDate && dupEndDate && new Date(dupEndDate) < new Date(dupStartDate)) {
+      setDupDateError("Visit End Date cannot be before the Visit Start Date");
+      return;
+    }
+    setDupDateError("");
+
     setDuplicating(true);
     try {
       const res = await fetch(`/api/admin/clients/${duplicateClient.id}/duplicate`, {
@@ -333,7 +350,8 @@ export default function ClientsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: dupName.trim(),
-          ...(dupVisitDate ? { visitDate: dupVisitDate } : {}),
+          startDate: dupStartDate || null,
+          endDate: dupEndDate || null,
           carryForwardTaskTypes: [...dupSelectedTypes],
         }),
       });
@@ -347,7 +365,7 @@ export default function ClientsPage() {
     } finally {
       setDuplicating(false);
     }
-  }, [duplicateClient, dupName, dupVisitDate, dupSelectedTypes, fetchAll]);
+  }, [duplicateClient, dupName, dupStartDate, dupEndDate, dupSelectedTypes, fetchAll]);
 
   return (
     <div className="space-y-6 animate-in">
@@ -490,16 +508,34 @@ export default function ClientsPage() {
               onChange={(e) => setDupName(e.target.value)}
             />
           </div>
-          <div>
-            <label className="block text-xs text-[#8896a9] mb-1.5 font-semibold">Visit Date</label>
-            <input
-              type="date"
-              className="bg-[#f8f9fc] border border-[#e2e7f0] rounded-lg px-3 py-2 text-[#0f1829] focus:outline-none focus:border-[#25488e] text-sm w-full transition-colors"
-              value={dupVisitDate}
-              onChange={(e) => setDupVisitDate(e.target.value)}
-            />
-            <p className="text-xs text-[#8896a9] mt-1.5">Leave empty to schedule the first visit for today.</p>
+          {/* Visit Start / End Date — identical fields, validation and data
+              model as the Edit Client popup. Saved on the duplicated client
+              AND applied to the visit created for it, so the duplicate never
+              needs a follow-up edit. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-[#8896a9] mb-1.5 font-semibold">Visit Start Date</label>
+              <input
+                type="date"
+                className="bg-[#f8f9fc] border border-[#e2e7f0] rounded-lg px-3 py-2 text-[#0f1829] focus:outline-none focus:border-[#25488e] text-sm w-full transition-colors"
+                value={dupStartDate}
+                onChange={(e) => { setDupStartDate(e.target.value); setDupDateError(""); }}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-[#8896a9] mb-1.5 font-semibold">Visit End Date</label>
+              <input
+                type="date"
+                min={dupStartDate || undefined}
+                className="bg-[#f8f9fc] border border-[#e2e7f0] rounded-lg px-3 py-2 text-[#0f1829] focus:outline-none focus:border-[#25488e] text-sm w-full transition-colors"
+                value={dupEndDate}
+                onChange={(e) => { setDupEndDate(e.target.value); setDupDateError(""); }}
+              />
+            </div>
           </div>
+          {dupDateError
+            ? <p className="text-xs text-red-600 -mt-1">{dupDateError}</p>
+            : <p className="text-xs text-[#8896a9] -mt-1">Leave empty to schedule the first visit for today.</p>}
 
           {/* ── Step 3: Carry Forward pending tasks ─────────────────────── */}
           <div>

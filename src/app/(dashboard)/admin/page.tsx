@@ -33,6 +33,8 @@ interface VisitItem {
   client: { name: string; code: string };
   executive: { id: string; name: string; email: string };
   status: string;
+  /** Progress-aware status — the ONLY value that may be shown to the user. */
+  displayStatus: string;
   scheduledDate: string;
   closedAt?: string | null;
   progress: number;
@@ -41,6 +43,17 @@ interface VisitItem {
 }
 
 interface Stats {
+  /** Counters scoped strictly to today's IST calendar day (Today's Alerts). */
+  today: {
+    total: number;
+    pendingCount: number;
+    inProgressCount: number;
+    completedCount: number;
+    missedCount: number;
+    carryForwardCount: number;
+    mdMeetingNoCount: number;
+    leaveRequestCount: number;
+  };
   summary: {
     total: number;
     pendingCount: number;
@@ -128,7 +141,10 @@ const VisitRow = memo(function VisitRow({ visit }: { visit: VisitItem }) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <p className="text-sm font-medium text-[#0f1829] truncate">{visit.client.name}</p>
-          <ProgressBadge progress={visit.progress} />
+          <ProgressBadge
+            progress={visit.progress}
+            displayStatus={visit.displayStatus as "PENDING" | "IN_PROGRESS" | "CLOSED"}
+          />
         </div>
         <p className="text-xs text-[#8896a9] mt-0.5 truncate">
           {visit.visitNumber} · {visit.executive.name} · {formatDate(new Date(visit.scheduledDate))}
@@ -197,7 +213,10 @@ function MobileVisitCard({ visit }: { visit: VisitItem }) {
     CLOSED:       { label: "Closed",      color: "text-green-700",  bg: "bg-green-50 border-green-200"  },
     CARRY_FORWARD:{ label: "Carry Fwd",   color: "text-[#ff944d]",  bg: "bg-orange-50 border-orange-200"},
   };
-  const meta = statusMeta[visit.status] ?? statusMeta["PENDING"];
+  // Must key off displayStatus, never the raw DB status: the raw value can be
+  // "OPEN" (no entry in this map → silently fell back to "Pending"), which is
+  // why fully-completed visits were still showing as Pending here.
+  const meta = statusMeta[visit.displayStatus] ?? statusMeta["PENDING"];
 
   return (
     <Link href={`/admin/visits/${visit.id}`} className="block">
@@ -248,26 +267,35 @@ export default function AdminDashboard() {
   const [selectedExecId, setSelectedExecId] = useState<string | null>(null);
 
   const fetchDashboardData = useCallback(async () => {
-    const [statsData, execData, pendingLeavesData] = await Promise.all([
+    // Today's pending-leave count now comes from /api/admin/stats (today-only),
+    // so the extra /api/admin/leaves round-trip this page used to make on every
+    // load has been dropped.
+    const [statsData, execData] = await Promise.all([
       fetchJSON<Stats>("/api/admin/stats"),
       fetchJSON<{ executives?: Executive[] }>("/api/admin/executives"),
-      fetchJSON<{ leaves?: unknown[] }>("/api/admin/leaves?status=PENDING"),
     ]);
     return {
       stats: statsData as Stats,
       executives: (execData.executives ?? []) as Executive[],
-      pendingLeavesCount: (pendingLeavesData.leaves ?? []).length as number,
     };
   }, []);
 
-  // Fetch once on mount; refreshed only by explicit mutations. No polling.
+  // Fetch on mount, on focus/visibility (see useLiveQuery), and after mutations.
   const { data: dashboardData, loading, refresh: fetchData } = useLiveQuery(fetchDashboardData);
   const stats = dashboardData?.stats ?? null;
   const executives = dashboardData?.executives ?? [];
-  const pendingLeavesCount = dashboardData?.pendingLeavesCount ?? 0;
 
+  // Every visit, in a single stable order. The three arrays returned by
+  // /api/admin/stats partition ALL visits by displayStatus (PENDING /
+  // IN_PROGRESS / CLOSED are exhaustive), so concatenating them loses none —
+  // they just need re-sorting into one chronological list.
   const allVisits = useMemo(
-    () => (stats ? [...stats.pendingVisits, ...stats.inProgressVisits, ...stats.closedVisits] : []),
+    () =>
+      stats
+        ? [...stats.pendingVisits, ...stats.inProgressVisits, ...stats.closedVisits].sort(
+            (a, b) => new Date(b.scheduledDate).getTime() - new Date(a.scheduledDate).getTime()
+          )
+        : [],
     [stats]
   );
 
@@ -275,7 +303,9 @@ export default function AdminDashboard() {
     if (activeTab === "pending")    return stats?.pendingVisits    ?? [];
     if (activeTab === "inprogress") return stats?.inProgressVisits ?? [];
     if (activeTab === "closed")     return stats?.closedVisits     ?? [];
-    return allVisits.slice(0, 8);
+    // "All Visits" means ALL of them — previously capped at 8, which made the
+    // dashboard silently hide most of the list.
+    return allVisits;
   }, [activeTab, stats, allVisits]);
 
   const tabConfig = useMemo(() => [
@@ -322,30 +352,31 @@ export default function AdminDashboard() {
       .slice(0, 5),
   [executives]);
 
-  // Today's Alerts — used on both desktop and mobile
+  // Today's Alerts — used on both desktop and mobile.
+  // EVERY counter here comes from `stats.today`, which the API computes
+  // strictly inside today's IST calendar day. Previously these read from
+  // `stats.summary`, i.e. all-time totals, which is why the panel titled
+  // "Today's Alerts" showed numbers covering every past and future visit.
   const alerts = useMemo(() => {
-    if (!stats) return [];
+    if (!stats?.today) return [];
     const items: { type: string; msg: string }[] = [];
-    const mc = stats.summary.missedCount ?? 0;
-    const pc = stats.summary.pendingCount;
-    const ic = stats.summary.inProgressCount;
-    const cf = stats.summary.carryForwardCount;
-    const rs = stats.summary.rescheduledCount ?? 0;
-    const md = stats.summary.mdMeetingNoCount ?? 0;
-    const lp = pendingLeavesCount;
-    if (md > 0) items.push({ type: "error",   msg: `${md} visit${md !== 1 ? "s" : ""} closed without MD Meeting` });
-    if (mc > 0) items.push({ type: "error",   msg: `${mc} overdue visit${mc !== 1 ? "s" : ""} not yet closed` });
-    if (pc > 0) items.push({ type: "warning", msg: `${pc} visit${pc !== 1 ? "s" : ""} pending action` });
-    if (ic > 0) items.push({ type: "info",    msg: `${ic} visit${ic !== 1 ? "s" : ""} currently in progress` });
-    if (cf > 0) items.push({ type: "accent",  msg: `${cf} subtask${cf !== 1 ? "s" : ""} carried forward` });
-    if (lp > 0) items.push({ type: "warning", msg: `${lp} leave request${lp !== 1 ? "s" : ""} awaiting your approval` });
-    if (rs > 0) items.push({ type: "info",    msg: `${rs} visit${rs !== 1 ? "s" : ""} rescheduled` });
+    const t = stats.today;
+    if (t.mdMeetingNoCount > 0)  items.push({ type: "error",   msg: `${t.mdMeetingNoCount} visit${t.mdMeetingNoCount !== 1 ? "s" : ""} closed today without MD Meeting` });
+    if (t.missedCount > 0)       items.push({ type: "error",   msg: `${t.missedCount} of today's visit${t.missedCount !== 1 ? "s are" : " is"} overdue and not closed` });
+    if (t.pendingCount > 0)      items.push({ type: "warning", msg: `${t.pendingCount} of today's visit${t.pendingCount !== 1 ? "s" : ""} pending action` });
+    if (t.inProgressCount > 0)   items.push({ type: "info",    msg: `${t.inProgressCount} of today's visit${t.inProgressCount !== 1 ? "s are" : " is"} in progress` });
+    if (t.completedCount > 0)    items.push({ type: "info",    msg: `${t.completedCount} visit${t.completedCount !== 1 ? "s" : ""} completed today` });
+    if (t.carryForwardCount > 0) items.push({ type: "accent",  msg: `${t.carryForwardCount} carried-forward item${t.carryForwardCount !== 1 ? "s" : ""} in today's visits` });
+    if (t.leaveRequestCount > 0) items.push({ type: "warning", msg: `${t.leaveRequestCount} leave request${t.leaveRequestCount !== 1 ? "s" : ""} raised today awaiting approval` });
     // NOTE: "Threshold reached" alert intentionally omitted — no threshold value
     // is defined anywhere in the codebase (only a static UI sentence on the
     // executive calendar page). Adding one here would mean fabricating a
     // business rule; skip until a real threshold is specified.
+    // Now that the counters are today-only, a quiet day legitimately yields
+    // zero items — say so instead of making the panel disappear.
+    if (items.length === 0) items.push({ type: "info", msg: "No alerts for today" });
     return items.slice(0, 6);
-  }, [stats, pendingLeavesCount]);
+  }, [stats]);
 
   const upcomingVisits = useMemo(() => allVisits.slice(0, 5), [allVisits]);
 
@@ -684,7 +715,7 @@ export default function AdminDashboard() {
                     <h2 className="text-lg font-bold text-[#0f1829]">Visits</h2>
                     <p className="text-sm text-[#8896a9]">
                       {activeTab === "all"
-                        ? `Showing recent ${displayVisits.length} of ${stats?.summary.total ?? 0}`
+                        ? `Showing all ${displayVisits.length} of ${stats?.summary.total ?? 0}`
                         : `${displayVisits.length} visit${displayVisits.length !== 1 ? "s" : ""} in this view`}
                     </p>
                   </div>
@@ -738,7 +769,9 @@ export default function AdminDashboard() {
                   </p>
                 </div>
               ) : (
-                <div>
+                // Scroll container so showing the complete list doesn't push
+                // the rest of the dashboard off-screen.
+                <div className="max-h-[640px] overflow-y-auto">
                   {displayVisits.map((visit) => (
                     <VisitRow key={visit.id} visit={visit} />
                   ))}

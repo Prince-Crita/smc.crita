@@ -7,12 +7,13 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils/utils";
 import toast from "react-hot-toast";
+import { Modal } from "@/components/ui/Modal";
 import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
 
 // --- Types ----------------------------------------------------------------------
 interface AttendanceRecord {
   id: string; date: string; punchIn: string; punchOut: string | null;
-  workingMinutes: number | null; isLate: boolean;
+  workingMinutes: number | null; isLate: boolean; notes?: string | null;
 }
 interface UpcomingVisit {
   id: string; visitNumber: string; scheduledDate: string;
@@ -446,6 +447,12 @@ function VisitConflictPanel({
 export default function LeavePage() {
   const [actionLoading, setActionLoading] = useState(false);
 
+  // Punch-out notes step (optional). Clicking Punch Out opens this prompt;
+  // the actual punch-out request is only sent from here, so the "one punch-out
+  // per day" rule is completely untouched — there is still exactly one call.
+  const [showPunchOutNotes, setShowPunchOutNotes] = useState(false);
+  const [punchOutNotes, setPunchOutNotes] = useState("");
+
   // Leave form state
   const [selectedDate, setSelectedDate] = useState("");
   const [leaveReason,  setLeaveReason]  = useState("");
@@ -531,9 +538,15 @@ export default function LeavePage() {
   const handlePunchOut = async () => {
     setActionLoading(true);
     try {
-      const res = await fetch("/api/attendance/punch-out", { method: "POST" });
+      const res = await fetch("/api/attendance/punch-out", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: punchOutNotes.trim() }),
+      });
       if (!res.ok) { const j = await res.json() as { error: string }; toast.error(j.error); return; }
       toast.success("Punched out successfully!");
+      setShowPunchOutNotes(false);
+      setPunchOutNotes("");
       await fetchAll();
     } finally { setActionLoading(false); }
   };
@@ -622,6 +635,54 @@ export default function LeavePage() {
   return (
     <div className="animate-in space-y-5">
 
+      {/* --- Punch Out notes (optional) ----------------------------------------- */}
+      <Modal
+        isOpen={showPunchOutNotes}
+        onClose={() => { if (!actionLoading) { setShowPunchOutNotes(false); setPunchOutNotes(""); } }}
+        title="Punch Out"
+        size="sm"
+        overlayClassName="pb-16 sm:pb-0"
+      >
+        <div className="p-5 space-y-4">
+          <p className="text-xs text-[#8896a9] leading-relaxed">
+            Add a note about today if you want to — worked overtime, client asked for extra
+            verification, delayed due to travel, and so on. This is optional.
+          </p>
+          <div>
+            <label className="text-xs font-semibold text-[#4a5568] mb-1 block">
+              Notes <span className="text-[#8896a9] font-normal">(optional)</span>
+            </label>
+            <textarea
+              autoFocus
+              value={punchOutNotes}
+              onChange={(e) => setPunchOutNotes(e.target.value)}
+              placeholder="e.g. Worked overtime — client requested extra verification"
+              rows={4}
+              maxLength={2000}
+              className="w-full border border-[#e2e7f0] rounded-lg px-3 py-2.5 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30 resize-none"
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => { setShowPunchOutNotes(false); setPunchOutNotes(""); }}
+              disabled={actionLoading}
+              className="flex-1 py-2.5 rounded-xl bg-[#f1f4f9] hover:bg-[#e2e7f0] text-[#4a5568] text-sm font-bold transition-colors press-effect disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handlePunchOut}
+              disabled={actionLoading}
+              className="flex-1 py-2.5 rounded-xl bg-[#ff944d] hover:bg-orange-500 text-white text-sm font-bold transition-colors press-effect disabled:opacity-50"
+            >
+              {actionLoading ? "…" : "Confirm Punch Out"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       {/* --- Incoming delegation requests (if any) ------------------------------ */}
       {!loading && incomingDelegations.length > 0 && (
         <div className="space-y-3">
@@ -651,9 +712,16 @@ export default function LeavePage() {
           {loading ? (
             <p className="text-sm text-white/50">Loading…</p>
           ) : hasPunchedOut ? (
-            <p className="text-sm text-green-300 font-medium">
-              Completed · {fmtMinutes(today!.workingMinutes ?? 0)} worked
-            </p>
+            <>
+              <p className="text-sm text-green-300 font-medium">
+                Completed · {fmtMinutes(today!.workingMinutes ?? 0)} worked
+              </p>
+              {today!.notes && (
+                <p className="text-xs text-white/60 mt-1 px-6 leading-relaxed">
+                  Note: {today!.notes}
+                </p>
+              )}
+            </>
           ) : hasPunchedIn ? (
             <p className="text-sm text-white/70">
               Punched in at {fmtTime(today!.punchIn)}
@@ -668,7 +736,7 @@ export default function LeavePage() {
         <div className="flex justify-center pb-5">
           {!loading && !hasPunchedOut && (
             <button
-              onClick={hasPunchedIn ? handlePunchOut : handlePunchIn}
+              onClick={hasPunchedIn ? () => setShowPunchOutNotes(true) : handlePunchIn}
               disabled={actionLoading}
               className={cn(
                 "px-8 py-3 rounded-xl font-bold text-sm transition-all press-effect shadow-md",

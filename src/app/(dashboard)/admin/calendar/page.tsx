@@ -392,9 +392,11 @@ export default function AdminCalendarPage() {
   // Fetch once on mount / week change; refreshed only by explicit mutations. No polling.
   const { data, loading, refresh } = useLiveQuery(fetchCalendar);
 
-  // Fetch clients + executives once
+  // Fetch clients + executives once. `meta=1` returns ONLY the dropdown
+  // options — this used to download every visit with all tasks/subtasks just
+  // to fill two <select>s.
   useEffect(() => {
-    fetchJSON<{ clients: Client[]; executives: Executive[] }>("/api/admin/visits")
+    fetchJSON<{ clients: Client[]; executives: Executive[] }>("/api/admin/visits?meta=1")
       .then(({ clients: c, executives: e }) => { setClients(c); setExecutives(e); })
       .catch(console.error);
   }, []);

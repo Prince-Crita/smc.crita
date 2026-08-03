@@ -14,6 +14,14 @@ export async function POST(request: NextRequest) {
     const now = new Date();
     const today = toMidnightIST(now);
 
+    // Optional free-text note the executive types on punch-out (overtime,
+    // travel delay, extra verification requested by the client, ...). Body may
+    // be absent entirely — punch-out used to be sent with no body at all, and
+    // that must keep working.
+    const body = (await request.json().catch(() => ({}))) as { notes?: unknown };
+    const notes =
+      typeof body?.notes === "string" && body.notes.trim() ? body.notes.trim().slice(0, 2000) : null;
+
     const existing = await prisma.attendance.findUnique({
       where: { executiveId_date: { executiveId: user.userId, date: today } },
     });
@@ -24,6 +32,8 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    // ONE punch-out per day — unchanged. The note rides along with that single
+    // punch-out, so there is exactly one note per attendance record.
     if (existing.punchOut) {
       return NextResponse.json(
         { error: "Already punched out for today" },
@@ -37,7 +47,7 @@ export async function POST(request: NextRequest) {
 
     const updated = await prisma.attendance.update({
       where: { id: existing.id },
-      data: { punchOut: now, workingMinutes },
+      data: { punchOut: now, workingMinutes, ...(notes ? { notes } : {}) },
     });
 
     return NextResponse.json({ attendance: updated });

@@ -94,10 +94,14 @@ export async function fetchJSON<T>(input: RequestInfo | URL, init?: RequestInit)
  *   2. on an explicit refresh()/mutate() call after a data mutation
  *      (visit changed, task updated, leave approved, ...).
  *
- * NOTHING else triggers a fetch. Focus/visibility revalidation is DISABLED
- * by default and interval polling is DISABLED by default (intervalMs = 0).
- * The app is completely idle after load - no background network traffic, no
- * re-renders - until the user performs an action. Pages with a genuine
+ *   3. when the window regains focus / the tab becomes visible again
+ *      (revalidateOnFocus / revalidateOnVisible, both ON by default).
+ *
+ * NOTHING else triggers a fetch. Interval polling stays DISABLED by default
+ * (intervalMs = 0), so the app is completely idle while nobody is looking at
+ * it - no background network traffic, no re-renders - and re-syncs the
+ * instant the user returns, which is what keeps every page free of stale
+ * data after another user mutates something. Pages with a genuine
  * cross-user live-sync requirement (e.g. Admin Attendance watching executive
  * punch-ins) may opt in with an explicit intervalMs; any non-zero value is
  * clamped to a MINIMUM of 60 seconds - short polling is forbidden.
@@ -124,9 +128,16 @@ export interface UseLiveQueryOptions {
    * polling every few seconds is forbidden.
    */
   intervalMs?: number;
-  /** Refetch when the window regains focus. Defaults to FALSE - refreshes are mutation-driven. */
+  /**
+   * Refetch when the window regains focus. Defaults to TRUE.
+   * This is an OS/user event, not polling: the app stays completely idle
+   * while in the background and re-syncs the moment the user comes back, so
+   * no page can show stale data (a visit closed by an executive is reflected
+   * on the admin's screen as soon as they look at it again). Bursts are
+   * collapsed by MIN_REFETCH_GAP_MS below.
+   */
   revalidateOnFocus?: boolean;
-  /** Refetch when the tab becomes visible again. Defaults to FALSE - refreshes are mutation-driven. */
+  /** Refetch when the tab becomes visible again. Defaults to TRUE - see above. */
   revalidateOnVisible?: boolean;
   /** Set to false to skip fetching entirely (e.g. while a required param is missing). */
   enabled?: boolean;
@@ -153,8 +164,8 @@ export function useLiveQuery<T>(
 ): UseLiveQueryResult<T> {
   const {
     intervalMs: rawIntervalMs = 0,
-    revalidateOnFocus = false,
-    revalidateOnVisible = false,
+    revalidateOnFocus = true,
+    revalidateOnVisible = true,
     enabled = true,
   } = options;
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db/prisma";
-import { signJwt, COOKIE_NAME } from "@/lib/auth/jwt";
+import { signJwt, COOKIE_NAME, SESSION_MAX_AGE_SECONDS, REMEMBER_MAX_AGE_SECONDS } from "@/lib/auth/jwt";
 import { loginSchema } from "@/lib/validations/auth";
 
 export async function POST(request: NextRequest) {
@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { identifier, password } = result.data;
+    const { identifier, password, rememberMe } = result.data;
     const trimmedIdentifier = identifier.trim();
     const isEmail = trimmedIdentifier.includes("@");
 
@@ -32,19 +32,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
     }
 
+    // "Remember Me" only extends the session lifetime. Everything else about
+    // the session is unchanged: same signed JWT, same httpOnly cookie, same
+    // Secure/SameSite flags, same server-side verification on every request.
+    // No token is ever exposed to JavaScript or stored in localStorage.
+    const maxAge = rememberMe ? REMEMBER_MAX_AGE_SECONDS : SESSION_MAX_AGE_SECONDS;
+
     const token = await signJwt({
       userId: user.id,
       email: user.email,
       name: user.name,
       role: user.role,
-    });
+    }, maxAge);
 
     // Log login activity
     await prisma.activityLog.create({
       data: {
         userId: user.id,
         action: "USER_LOGIN",
-        metadata: { role: user.role, name: user.name, ip: request.headers.get("x-forwarded-for") || "unknown" },
+        metadata: { role: user.role, name: user.name, rememberMe: !!rememberMe, ip: request.headers.get("x-forwarded-for") || "unknown" },
       },
     });
 
@@ -57,7 +63,7 @@ export async function POST(request: NextRequest) {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: 8 * 60 * 60, // 8 hours
+      maxAge, // matches the JWT expiry exactly (8h, or 30d with Remember Me)
       path: "/",
     });
 

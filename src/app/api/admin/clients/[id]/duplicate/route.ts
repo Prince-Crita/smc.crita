@@ -8,11 +8,21 @@
  *   • Contact/visit configuration (contact person, address, phone, emails,
  *     report recipients, engagement start/end dates)
  *
- * Body: { name: string; visitDate?: string }
+ * Body: { name: string; startDate?: string | null; endDate?: string | null }
  *   name      → the new client's name (admin-edited)
- *   visitDate → optional; when provided (and the source client has an
- *               assigned executive) the first visit is scheduled on it,
- *               otherwise "now" is used.
+ *   startDate → Visit Start Date. Same field and semantics as the Edit Client
+ *               popup: stored on Client.startDate AND used as the created
+ *               visit's scheduledDate. Falls back to the source client's
+ *               startDate, then to "now".
+ *   endDate   → Visit End Date. Stored on Client.endDate AND used as the
+ *               created visit's endDate (the carry-forward window boundary —
+ *               see the Visit.endDate doc). Falls back to the source client's
+ *               endDate.
+ *
+ * Because both dates are persisted on the client AND on the visit in one
+ * request, the duplicate is complete the moment it is created — it shows up
+ * with the correct dates on every dashboard, calendar, visit list and report,
+ * and the assigned executive receives it immediately. No follow-up edit.
  *
  * A unique client code is generated from the source code (SRC → SRC-2,
  * SRC-3, ...). The first visit is auto-created immediately so the duplicate
@@ -97,9 +107,10 @@ export async function POST(
 
   try {
     const body = await request.json().catch(() => ({}));
-    const { name, visitDate, carryForwardTaskTypes } = body as {
+    const { name, startDate, endDate, carryForwardTaskTypes } = body as {
       name?: string;
-      visitDate?: string;
+      startDate?: string | null;
+      endDate?: string | null;
       /** Main task types (from GET) whose incomplete subtasks should be
        *  carried into the duplicated visit as Carry Forward items. */
       carryForwardTaskTypes?: string[];
@@ -115,6 +126,27 @@ export async function POST(
       },
     });
     if (!source) return NextResponse.json({ error: "Client not found" }, { status: 404 });
+
+    // ── Resolve Visit Start / End Date ──────────────────────────────────────
+    // Explicitly provided (including explicit null) wins; otherwise inherit the
+    // source client's window. Validated exactly like POST /api/admin/visits.
+    const parseDate = (v: string | null | undefined, fallback: Date | null): Date | null =>
+      v === undefined ? fallback : v ? new Date(v) : null;
+
+    if (startDate && isNaN(new Date(startDate).getTime()))
+      return NextResponse.json({ error: "Invalid Visit Start Date" }, { status: 400 });
+    if (endDate && isNaN(new Date(endDate).getTime()))
+      return NextResponse.json({ error: "Invalid Visit End Date" }, { status: 400 });
+
+    const newStartDate = parseDate(startDate, source.startDate);
+    const newEndDate = parseDate(endDate, source.endDate);
+
+    if (newStartDate && newEndDate && newEndDate < newStartDate) {
+      return NextResponse.json(
+        { error: "Visit End Date cannot be before the Visit Start Date" },
+        { status: 400 }
+      );
+    }
 
     // ── Generate a unique code: SRC → SRC-2, SRC-3, ... ────────────────────
     const baseCode = source.code.replace(/-\d+$/, "");
@@ -137,8 +169,8 @@ export async function POST(
         email: source.email,
         reportEmails: source.reportEmails,
         assignedExecId: source.assignedExecId,
-        startDate: source.startDate,
-        endDate: source.endDate,
+        startDate: newStartDate,
+        endDate: newEndDate,
       },
       include: { assignedExec: { select: { id: true, name: true, email: true } } },
     });
@@ -190,7 +222,10 @@ export async function POST(
     if (newClient.assignedExecId) {
       try {
         visitInfo = await createVisitForClient(newClient.id, newClient.assignedExecId, user.userId, {
-          scheduledDate: visitDate ? new Date(visitDate) : undefined,
+          // The duplicate is a brand-new client row, so it can never have a
+          // pre-existing active visit — the dates below are always applied.
+          scheduledDate: newStartDate ?? undefined,
+          endDate: newEndDate ?? undefined,
         });
 
         // ── Selective carry-forward (admin-chosen pending tasks) ─────────
