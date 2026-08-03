@@ -136,10 +136,18 @@ function DailyAttendanceView() {
   }, [dateFilter, execFilter]);
 
   // Attendance is the ONE page with a hard cross-user live-sync requirement:
-  // when an executive punches in, the admin view must flip Absent → Present
-  // without a manual reload. 60s is the minimum allowed poll interval; the
-  // background refetch is silent (no skeleton flash). No other page polls.
-  const { data, loading, refresh } = useLiveQuery(fetchData, { intervalMs: 60000 });
+  // when an executive punches in, punches out, or sends a punch-out note, the
+  // admin's OPEN screen must reflect it without any interaction — no manual
+  // reload, no tab switch. The app has no server push channel (no WebSocket,
+  // no SSE), and mutation-driven refresh only ever updates the device that
+  // performed the mutation, so a short interval on this one screen is what
+  // closes the cross-user gap. 5s keeps it effectively immediate while
+  // staying cheap: one small single-day query, and only while an admin
+  // actually has this tab open. The refetch is silent (no skeleton flash).
+  const { data, loading, refresh } = useLiveQuery(fetchData, {
+    intervalMs: 5000,
+    allowShortInterval: true,
+  });
 
   // Build absent list — executives with no record on selected date
   const presentIds = new Set(data?.records.map((r) => r.executive.id) ?? []);

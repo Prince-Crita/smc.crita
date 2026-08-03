@@ -104,7 +104,9 @@ export async function fetchJSON<T>(input: RequestInfo | URL, init?: RequestInit)
  * data after another user mutates something. Pages with a genuine
  * cross-user live-sync requirement (e.g. Admin Attendance watching executive
  * punch-ins) may opt in with an explicit intervalMs; any non-zero value is
- * clamped to a MINIMUM of 60 seconds - short polling is forbidden.
+ * clamped to a MINIMUM of 60 seconds unless the caller also passes
+ * allowShortInterval, which lowers that floor to 3 seconds for the handful of
+ * screens that must reflect ANOTHER user's action without interaction.
  *
  * IMPORTANT: `loading` is only true while there is NO data yet (initial
  * load). Background revalidations update data silently - they must never
@@ -128,6 +130,21 @@ export interface UseLiveQueryOptions {
    * polling every few seconds is forbidden.
    */
   intervalMs?: number;
+  /**
+   * Opt OUT of the 60-second polling floor for a screen that genuinely needs
+   * near-real-time cross-user updates.
+   *
+   * Use this only where one user must see ANOTHER user's change without
+   * touching anything — the app has no server push channel (no WebSocket, no
+   * SSE), so a short client interval is the only way to close that gap.
+   * Currently used by exactly one screen: Admin → Attendance (daily), where
+   * an executive punching out or sending a note must surface on the admin's
+   * open screen straight away.
+   *
+   * Still floored at 3s so no caller can create a request storm, and the
+   * in-flight guard below means a slow response can never stack requests.
+   */
+  allowShortInterval?: boolean;
   /**
    * Refetch when the window regains focus. Defaults to TRUE.
    * This is an OS/user event, not polling: the app stays completely idle
@@ -164,14 +181,16 @@ export function useLiveQuery<T>(
 ): UseLiveQueryResult<T> {
   const {
     intervalMs: rawIntervalMs = 0,
+    allowShortInterval = false,
     revalidateOnFocus = true,
     revalidateOnVisible = true,
     enabled = true,
   } = options;
 
-  // Hard floor: polling faster than 60s is never allowed, no matter what a
-  // caller passes. 0 stays 0 (no polling at all).
-  const MIN_POLL_MS = 60000;
+  // Floor: polling faster than 60s is not allowed by default. Screens with a
+  // genuine cross-user live requirement opt in via allowShortInterval, which
+  // lowers the floor to 3s (never to zero). 0 stays 0 (no polling at all).
+  const MIN_POLL_MS = allowShortInterval ? 3000 : 60000;
   const intervalMs = rawIntervalMs > 0 ? Math.max(rawIntervalMs, MIN_POLL_MS) : 0;
 
   const [data, setData] = useState<T | null>(null);
