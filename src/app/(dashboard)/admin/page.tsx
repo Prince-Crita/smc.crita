@@ -361,11 +361,11 @@ export default function AdminDashboard() {
     if (!stats?.today) return [];
     const items: { type: string; msg: string }[] = [];
     const t = stats.today;
-    if (t.mdMeetingNoCount > 0)  items.push({ type: "error",   msg: `${t.mdMeetingNoCount} visit${t.mdMeetingNoCount !== 1 ? "s" : ""} closed today without MD Meeting` });
+    if (t.mdMeetingNoCount > 0)  items.push({ type: "error",   msg: `${t.mdMeetingNoCount} of today's visit${t.mdMeetingNoCount !== 1 ? "s were" : " was"} closed without MD Meeting` });
     if (t.missedCount > 0)       items.push({ type: "error",   msg: `${t.missedCount} of today's visit${t.missedCount !== 1 ? "s are" : " is"} overdue and not closed` });
     if (t.pendingCount > 0)      items.push({ type: "warning", msg: `${t.pendingCount} of today's visit${t.pendingCount !== 1 ? "s" : ""} pending action` });
     if (t.inProgressCount > 0)   items.push({ type: "info",    msg: `${t.inProgressCount} of today's visit${t.inProgressCount !== 1 ? "s are" : " is"} in progress` });
-    if (t.completedCount > 0)    items.push({ type: "info",    msg: `${t.completedCount} visit${t.completedCount !== 1 ? "s" : ""} completed today` });
+    if (t.completedCount > 0)    items.push({ type: "info",    msg: `${t.completedCount} of today's visit${t.completedCount !== 1 ? "s are" : " is"} completed` });
     if (t.carryForwardCount > 0) items.push({ type: "accent",  msg: `${t.carryForwardCount} carried-forward item${t.carryForwardCount !== 1 ? "s" : ""} in today's visits` });
     if (t.leaveRequestCount > 0) items.push({ type: "warning", msg: `${t.leaveRequestCount} leave request${t.leaveRequestCount !== 1 ? "s" : ""} raised today awaiting approval` });
     // NOTE: "Threshold reached" alert intentionally omitted — no threshold value

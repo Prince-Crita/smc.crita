@@ -104,12 +104,6 @@ export async function GET(request: NextRequest) {
       const endsAt = v.endDate ? new Date(v.endDate) : startsAt;
       const isToday = startsAt < todayEnd && endsAt >= todayStart;
 
-      // Closed TODAY (the closedAt instant falls inside today's IST day) —
-      // this is what "Today's Completed" must count, not "closed at any
-      // point in the past".
-      const closedToday =
-        !!v.closedAt && new Date(v.closedAt) >= todayStart && new Date(v.closedAt) < todayEnd;
-
       return {
         id: v.id,
         visitNumber: v.visitNumber,
@@ -127,7 +121,6 @@ export async function GET(request: NextRequest) {
         hasCarryForward,
         isOverdue,
         isToday,
-        closedToday,
         mdMeetingNo,
       };
     });
@@ -138,25 +131,29 @@ export async function GET(request: NextRequest) {
     const overdueVisits    = withProgress.filter((v) => v.isOverdue);
 
     // ── TODAY-ONLY counters (drive the "Today's Alerts" panel) ────────────
-    // Every counter below is derived from `isToday` / `closedToday`, so no
-    // previous or future date can leak into the panel.
+    // SINGLE BASIS: `isToday`, i.e. the visit's SCHEDULED window overlaps
+    // today's IST calendar day. Every counter below is a filter over that one
+    // set, so no visit from a previous or future date can reach the panel
+    // through any counter, and the parts always add up to the whole:
+    //   total === pending + inProgress + completed
+    // (displayStatus is exhaustive over those three).
     const todayVisits = withProgress.filter((v) => v.isToday);
     const todaySummary = {
       total:             todayVisits.length,
       pendingCount:      todayVisits.filter((v) => v.displayStatus === "PENDING").length,
       inProgressCount:   todayVisits.filter((v) => v.displayStatus === "IN_PROGRESS").length,
-      // Completed today = the visit was actually closed during today's IST
-      // day (a visit closed last week is not "today's completed").
-      completedCount:    withProgress.filter((v) => v.closedToday).length,
-      // Missed today = due today (or earlier, still inside today's window)
-      // and past its scheduled start while still not closed — the same
-      // overdue rule used everywhere else, scoped to today.
+      // Completed = a visit SCHEDULED for today that is now closed. Deliberately
+      // NOT "closedAt falls inside today": a visit scheduled last week but closed
+      // this morning is not one of today's visits and must not appear here.
+      completedCount:    todayVisits.filter((v) => v.displayStatus === "CLOSED").length,
+      // Missed = scheduled for today, past its scheduled start, still not closed
+      // — the same overdue rule used everywhere else, scoped to today.
       missedCount:       todayVisits.filter((v) => v.isOverdue).length,
       carryForwardCount: todayVisits.reduce(
         (s, v) => s + (v.carryForwardCount > 0 ? v.carryForwardCount : v.hasCarryForward ? 1 : 0),
         0
       ),
-      mdMeetingNoCount:  withProgress.filter((v) => v.closedToday && v.mdMeetingNo).length,
+      mdMeetingNoCount:  todayVisits.filter((v) => v.mdMeetingNo).length,
       leaveRequestCount: todayLeaveCount,
     };
 
