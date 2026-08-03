@@ -135,3 +135,27 @@ export function roleLabel(role: string): string {
   if (role === "EXECUTIVE") return "Executive";
   return role;
 }
+
+/**
+ * The identifier shown on an account card, chosen by ROLE rather than by
+ * whatever the user happened to type at login:
+ *   Admin / Super Admin → email
+ *   Executive           → mobile number
+ *
+ * Falls back to the other value when the preferred one is missing (an
+ * executive with no phone on record still gets a usable card).
+ *
+ * This doubles as the value prefilled into the login form if the device's
+ * remember cookie has expired — POST /api/auth/login accepts either an email
+ * or a mobile number as `identifier`, so both forms work there.
+ */
+export function displayIdentifier(
+  role: string,
+  email: string | null | undefined,
+  phone: string | null | undefined
+): string {
+  const e = (email ?? "").trim();
+  const p = (phone ?? "").trim();
+  if (role === "EXECUTIVE") return p || e;
+  return e || p;
+}

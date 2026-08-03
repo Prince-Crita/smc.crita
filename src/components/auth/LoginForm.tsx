@@ -15,6 +15,7 @@ import {
   rememberAccount,
   forgetAccount,
   roleLabel,
+  displayIdentifier,
   type RememberedAccount,
 } from "@/lib/auth/remembered-accounts";
 
@@ -64,9 +65,13 @@ export default function LoginForm() {
 
       if (!res.ok) {
         if (json.code === "ACCOUNT_UNAVAILABLE") {
-          // Deleted or deactivated — the server already dropped it from the
-          // device cookie; drop our local copy too so the card disappears.
-          forgetAccount(account.id); // the store notifies subscribers
+          // Deleted, deactivated by an admin, or otherwise unusable. Fail
+          // gracefully: the server already dropped it from the device cookie,
+          // so drop our local copy too and the card disappears. Other
+          // remembered accounts are untouched; if this was the last one, fall
+          // back to the existing login form.
+          const remaining = forgetAccount(account.id);
+          if (remaining.length === 0) setShowForm(true);
           toast.error(json.error || "This account is no longer available");
           return;
         }
@@ -81,13 +86,17 @@ export default function LoginForm() {
       }
 
       toast.success(`Welcome back, ${json.user?.name ?? account.name}!`);
-      // Refresh the stored profile in case the name/role changed server-side.
+      // Refresh the stored profile in case the name, role, email or mobile
+      // changed server-side. This also self-heals cards saved before the
+      // role-based identifier rule existed.
       if (json.user) {
         rememberAccount({
           id: json.user.id,
           name: json.user.name,
           role: json.user.role,
-          identifier: account.identifier,
+          identifier:
+            displayIdentifier(json.user.role, json.user.email, json.user.phone) ||
+            account.identifier,
         });
       }
       goToDashboard(json.user?.role ?? account.role);
@@ -134,12 +143,16 @@ export default function LoginForm() {
 
       // Remember this account on this device — additive, so any accounts
       // already remembered here are kept. Only non-secret profile fields.
+      // The card identifier comes from the user's RECORD by role (admin →
+      // email, executive → mobile), not from whatever they typed to sign in.
       if (json.remembered) {
         rememberAccount({
           id: json.user.id,
           name: json.user.name,
           role: json.user.role,
-          identifier: data.identifier.trim(),
+          identifier:
+            displayIdentifier(json.user.role, json.user.email, json.user.phone) ||
+            data.identifier.trim(),
         });
       }
 
@@ -223,44 +236,47 @@ export default function LoginForm() {
                 {accounts.map((account) => (
                   <div
                     key={account.id}
-                    className="relative flex items-center gap-3 p-3 rounded-xl border border-[#e2e7f0] bg-[#f8f9fc] hover:border-[#25488e]/40 transition-colors"
+                    className="flex items-center gap-3 p-3 rounded-xl border border-[#e2e7f0] bg-[#f8f9fc] hover:border-[#25488e]/40 transition-colors"
                   >
                     <div className="w-11 h-11 rounded-full bg-[#25488e] flex items-center justify-center text-white font-bold text-base flex-shrink-0">
                       {account.name.charAt(0).toUpperCase()}
                     </div>
 
-                    <div className="flex-1 min-w-0 pr-5">
+                    <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold text-[#0f1829] truncate">{account.name}</p>
                       <p className="text-xs text-[#8896a9]">{roleLabel(account.role)}</p>
                       <p className="text-xs text-[#8896a9] truncate">{account.identifier}</p>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleContinue(account)}
-                      disabled={continuingId !== null}
-                      className="flex-shrink-0 px-4 py-2 bg-[#25488e] hover:bg-[#1e3a72] disabled:bg-[#25488e]/50 text-white text-sm font-semibold rounded-lg transition-all press-effect flex items-center gap-2"
-                    >
-                      {continuingId === account.id ? (
-                        <>
-                          <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                          <span>…</span>
-                        </>
-                      ) : (
-                        "Continue"
-                      )}
-                    </button>
+                    <div className="flex-shrink-0 flex flex-col items-stretch gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleContinue(account)}
+                        disabled={continuingId !== null}
+                        className="px-4 py-2 bg-[#25488e] hover:bg-[#1e3a72] disabled:bg-[#25488e]/50 text-white text-sm font-semibold rounded-lg transition-all press-effect flex items-center justify-center gap-2"
+                      >
+                        {continuingId === account.id ? (
+                          <>
+                            <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            <span>…</span>
+                          </>
+                        ) : (
+                          "Continue"
+                        )}
+                      </button>
 
-                    <button
-                      type="button"
-                      onClick={() => handleRemove(account)}
-                      disabled={continuingId !== null}
-                      title={`Remove ${account.name} from this device`}
-                      aria-label={`Remove ${account.name} from this device`}
-                      className="absolute top-1.5 right-1.5 p-1 rounded-md text-[#c8d2e0] hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemove(account)}
+                        disabled={continuingId !== null}
+                        title={`Remove ${account.name} from this device`}
+                        aria-label={`Remove ${account.name} from this device`}
+                        className="px-4 py-1 text-xs font-semibold text-[#8896a9] hover:text-red-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                      >
+                        <X className="w-3 h-3" />
+                        Remove
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
