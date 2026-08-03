@@ -16,8 +16,14 @@ export async function POST(request: NextRequest) {
       });
     }
     const response = NextResponse.json({ success: true });
-    // Explicit path/flags so the long-lived "Remember Me" cookie is reliably
-    // cleared — logout must always win over Remember Me.
+    // Clears the SESSION cookie only, with explicit path/flags so even a
+    // 30-day session is reliably ended.
+    //
+    // The device's `smc_remember` cookie is intentionally NOT touched here:
+    // logging out ends the session, it does not un-remember the account. The
+    // card stays on the login screen so the user can tap Continue — that is
+    // the whole point of Remember Account. Use POST /api/auth/forget (the
+    // Remove button on the card) to actually drop an account from a device.
     response.cookies.set(COOKIE_NAME, "", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -28,8 +34,14 @@ export async function POST(request: NextRequest) {
     return response;
   } catch {
     const response = NextResponse.json({ success: true });
-    // Explicit path/flags so the long-lived "Remember Me" cookie is reliably
-    // cleared — logout must always win over Remember Me.
+    // Clears the SESSION cookie only, with explicit path/flags so even a
+    // 30-day session is reliably ended.
+    //
+    // The device's `smc_remember` cookie is intentionally NOT touched here:
+    // logging out ends the session, it does not un-remember the account. The
+    // card stays on the login screen so the user can tap Continue — that is
+    // the whole point of Remember Account. Use POST /api/auth/forget (the
+    // Remove button on the card) to actually drop an account from a device.
     response.cookies.set(COOKIE_NAME, "", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",

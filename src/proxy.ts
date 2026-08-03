@@ -3,7 +3,11 @@ import type { NextRequest } from "next/server";
 import { verifyJwt, COOKIE_NAME } from "@/lib/auth/jwt";
 import { isAdminRole } from "@/lib/auth/roles";
 
-const PUBLIC_PATHS = ["/login", "/api/auth/login"];
+// Reachable without a session. /api/auth/continue and /api/auth/forget serve
+// the login screen's remembered-account cards, so by definition the caller is
+// signed out. They authorise themselves from the httpOnly `smc_remember`
+// cookie instead (see those routes).
+const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/auth/continue", "/api/auth/forget"];
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

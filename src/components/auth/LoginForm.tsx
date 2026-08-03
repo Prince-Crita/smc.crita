@@ -1,27 +1,118 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import toast from "react-hot-toast";
 import Image from "next/image";
-import { Eye, EyeOff, Lock, User } from "lucide-react";
+import { Eye, EyeOff, Lock, User, X, Plus } from "lucide-react";
 import { loginSchema, LoginInput } from "@/lib/validations/auth";
+import {
+  getAccountsSnapshot,
+  getAccountsServerSnapshot,
+  subscribeToAccounts,
+  rememberAccount,
+  forgetAccount,
+  roleLabel,
+  type RememberedAccount,
+} from "@/lib/auth/remembered-accounts";
 
 export default function LoginForm() {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
+  // ── Remembered accounts on THIS device ──────────────────────────────────
+  // Read straight from localStorage — no API call, no polling, cards are on
+  // screen in the first client paint. useSyncExternalStore handles the SSR
+  // snapshot (empty) and keeps the list in sync if another tab edits it.
+  const accounts = useSyncExternalStore(
+    subscribeToAccounts,
+    getAccountsSnapshot,
+    getAccountsServerSnapshot
+  );
+  const [showForm, setShowForm] = useState(false);
+  const [continuingId, setContinuingId] = useState<string | null>(null);
+
   const {
     register,
     handleSubmit,
+    setValue,
+    setFocus,
     formState: { errors },
   } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
     defaultValues: { rememberMe: false },
   });
+
+  const goToDashboard = (role: string) => {
+    if (role === "EXECUTIVE") router.push("/executive");
+    else router.push("/admin");
+  };
+
+  /** Tap-to-continue on a remembered account — no credentials retyped. */
+  const handleContinue = async (account: RememberedAccount) => {
+    setContinuingId(account.id);
+    try {
+      const res = await fetch("/api/auth/continue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: account.id }),
+      });
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        if (json.code === "ACCOUNT_UNAVAILABLE") {
+          // Deleted or deactivated — the server already dropped it from the
+          // device cookie; drop our local copy too so the card disappears.
+          forgetAccount(account.id); // the store notifies subscribers
+          toast.error(json.error || "This account is no longer available");
+          return;
+        }
+        // Device cookie expired or cleared. The account stays listed, but it
+        // now needs a password: open the form with the identifier prefilled.
+        toast.error(json.error || "Please sign in to continue");
+        setValue("identifier", account.identifier);
+        setValue("rememberMe", true);
+        setShowForm(true);
+        setTimeout(() => setFocus("password"), 50);
+        return;
+      }
+
+      toast.success(`Welcome back, ${json.user?.name ?? account.name}!`);
+      // Refresh the stored profile in case the name/role changed server-side.
+      if (json.user) {
+        rememberAccount({
+          id: json.user.id,
+          name: json.user.name,
+          role: json.user.role,
+          identifier: account.identifier,
+        });
+      }
+      goToDashboard(json.user?.role ?? account.role);
+    } catch {
+      toast.error("Something went wrong. Please try again.");
+    } finally {
+      setContinuingId(null);
+    }
+  };
+
+  /** Remove ONE account from this device. Others are unaffected. */
+  const handleRemove = async (account: RememberedAccount) => {
+    const next = forgetAccount(account.id);
+    if (next.length === 0) setShowForm(true);
+    try {
+      await fetch("/api/auth/forget", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: account.id }),
+      });
+    } catch {
+      /* local list is already updated; the cookie entry simply expires */
+    }
+    toast.success(`Removed ${account.name}`);
+  };
 
   const onSubmit = async (data: LoginInput) => {
     setIsLoading(true);
@@ -41,11 +132,18 @@ export default function LoginForm() {
 
       toast.success(`Welcome back, ${json.user.name}!`);
 
-      if (json.user.role === "EXECUTIVE") {
-        router.push("/executive");
-      } else {
-        router.push("/admin");
+      // Remember this account on this device — additive, so any accounts
+      // already remembered here are kept. Only non-secret profile fields.
+      if (json.remembered) {
+        rememberAccount({
+          id: json.user.id,
+          name: json.user.name,
+          role: json.user.role,
+          identifier: data.identifier.trim(),
+        });
       }
+
+      goToDashboard(json.user.role);
     } catch {
       toast.error("Something went wrong. Please try again.");
     } finally {
@@ -110,8 +208,86 @@ export default function LoginForm() {
             </div>
           </div>
 
-          {/* Card */}
-          <div className="bg-white rounded-2xl border border-[#e2e7f0] shadow-xl p-8">
+          {/* ── Remembered accounts on this device ──────────────────────────
+              Rendered ABOVE the existing sign-in card, which is untouched.
+              Only appears once mounted (localStorage is client-only) and only
+              when this device actually has remembered accounts. */}
+          {accounts.length > 0 && (
+            <div className="bg-white rounded-2xl border border-[#e2e7f0] shadow-xl p-6 mb-5">
+              <div className="mb-5">
+                <h2 className="text-xl font-bold text-[#0f1829]">Choose an account</h2>
+                <p className="text-[#8896a9] text-sm mt-1">Saved on this device</p>
+              </div>
+
+              <div className="space-y-3">
+                {accounts.map((account) => (
+                  <div
+                    key={account.id}
+                    className="relative flex items-center gap-3 p-3 rounded-xl border border-[#e2e7f0] bg-[#f8f9fc] hover:border-[#25488e]/40 transition-colors"
+                  >
+                    <div className="w-11 h-11 rounded-full bg-[#25488e] flex items-center justify-center text-white font-bold text-base flex-shrink-0">
+                      {account.name.charAt(0).toUpperCase()}
+                    </div>
+
+                    <div className="flex-1 min-w-0 pr-5">
+                      <p className="text-sm font-bold text-[#0f1829] truncate">{account.name}</p>
+                      <p className="text-xs text-[#8896a9]">{roleLabel(account.role)}</p>
+                      <p className="text-xs text-[#8896a9] truncate">{account.identifier}</p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleContinue(account)}
+                      disabled={continuingId !== null}
+                      className="flex-shrink-0 px-4 py-2 bg-[#25488e] hover:bg-[#1e3a72] disabled:bg-[#25488e]/50 text-white text-sm font-semibold rounded-lg transition-all press-effect flex items-center gap-2"
+                    >
+                      {continuingId === account.id ? (
+                        <>
+                          <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          <span>…</span>
+                        </>
+                      ) : (
+                        "Continue"
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleRemove(account)}
+                      disabled={continuingId !== null}
+                      title={`Remove ${account.name} from this device`}
+                      aria-label={`Remove ${account.name} from this device`}
+                      className="absolute top-1.5 right-1.5 p-1 rounded-md text-[#c8d2e0] hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {!showForm && (
+                <button
+                  type="button"
+                  onClick={() => setShowForm(true)}
+                  className="w-full mt-4 py-2.5 flex items-center justify-center gap-2 text-sm font-semibold text-[#25488e] hover:text-[#1e3a72] border border-dashed border-[#c8d2e0] hover:border-[#25488e] rounded-xl transition-colors press-effect"
+                >
+                  <Plus className="w-4 h-4" />
+                  Login with another account
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Card — the existing sign-in form, unchanged. Collapsed only while
+              remembered accounts are being offered and the user has not asked
+              to add another account. */}
+          <div
+            className={
+              accounts.length > 0 && !showForm
+                ? "hidden"
+                : "bg-white rounded-2xl border border-[#e2e7f0] shadow-xl p-8"
+            }
+          >
             <div className="mb-8">
               <h2 className="text-2xl font-bold text-[#0f1829]">Sign In</h2>
               <p className="text-[#8896a9] text-sm mt-1">Enter your credentials to access the portal</p>
@@ -167,9 +343,11 @@ export default function LoginForm() {
                 )}
               </div>
 
-              {/* Remember Me — extends the session to 30 days. The session is
-                  still a signed, httpOnly, Secure cookie verified server-side
-                  on every request; only its lifetime changes. */}
+              {/* Remember Me — extends the session to 30 days AND saves this
+                  account on this device, so it is still offered on the login
+                  screen after logging out. The session itself is unchanged: a
+                  signed, httpOnly, Secure cookie verified server-side on every
+                  request. No password is ever stored. */}
               <label htmlFor="rememberMe" className="flex items-center gap-2.5 cursor-pointer select-none">
                 <input
                   id="rememberMe"
@@ -178,7 +356,7 @@ export default function LoginForm() {
                   className="w-4 h-4 rounded border-[#c8d2e0] accent-[#25488e]"
                 />
                 <span className="text-sm text-[#4a5568]">Remember me</span>
-                <span className="text-xs text-[#8896a9] ml-auto">Stay signed in for 30 days</span>
+                <span className="text-xs text-[#8896a9] ml-auto">Save this account on this device</span>
               </label>
 
               {/* Submit */}
@@ -197,6 +375,17 @@ export default function LoginForm() {
                   "Sign In"
                 )}
               </button>
+
+              {/* Back to the saved-account list (only when there is one) */}
+              {accounts.length > 0 && showForm && (
+                <button
+                  type="button"
+                  onClick={() => setShowForm(false)}
+                  className="w-full text-xs font-semibold text-[#8896a9] hover:text-[#25488e] transition-colors"
+                >
+                  ← Back to saved accounts
+                </button>
+              )}
             </form>
           </div>
 
