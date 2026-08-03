@@ -118,3 +118,62 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
+
+// ─── PATCH /api/attendance ─── Submit today's punch-out note ────────────────
+// Separate from punch-out itself: the executive punches out immediately, then
+// optionally sends a note from the inline Notes section that appears
+// afterwards. Attendance business logic is untouched — this only fills in the
+// `notes` column that already exists on the Attendance model.
+export async function PATCH(request: NextRequest) {
+  const user = await getAuthUser(request);
+  if (!user || user.role !== "EXECUTIVE") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  try {
+    const body = (await request.json().catch(() => ({}))) as { notes?: unknown };
+    const notes =
+      typeof body.notes === "string" && body.notes.trim()
+        ? body.notes.trim().slice(0, 2000)
+        : "";
+
+    if (!notes) {
+      return NextResponse.json({ error: "Note cannot be empty" }, { status: 400 });
+    }
+
+    const today = toMidnightIST(new Date());
+    const existing = await prisma.attendance.findUnique({
+      where: { executiveId_date: { executiveId: user.userId, date: today } },
+    });
+
+    if (!existing) {
+      return NextResponse.json({ error: "You have not punched in today" }, { status: 400 });
+    }
+    // The note describes the day that just ended, so it belongs to a completed
+    // punch-out.
+    if (!existing.punchOut) {
+      return NextResponse.json(
+        { error: "Punch out first, then add your note" },
+        { status: 400 }
+      );
+    }
+    // One note per attendance record — a second submission is rejected rather
+    // than silently overwriting the first.
+    if (existing.notes) {
+      return NextResponse.json(
+        { error: "A note has already been submitted for today", code: "NOTE_EXISTS" },
+        { status: 409 }
+      );
+    }
+
+    const updated = await prisma.attendance.update({
+      where: { id: existing.id },
+      data: { notes },
+    });
+
+    return NextResponse.json({ attendance: updated });
+  } catch (error) {
+    console.error("Attendance note error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}

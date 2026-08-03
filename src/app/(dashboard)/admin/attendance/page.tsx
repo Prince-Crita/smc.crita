@@ -52,7 +52,7 @@ function PunchOutNoteModal({
 }) {
   if (!record) return null;
   return (
-    <Modal isOpen onClose={onClose} title="Punch Out Note" size="sm">
+    <Modal isOpen onClose={onClose} title="Attendance Note" size="sm">
       <div className="p-5 space-y-4">
         <div className="space-y-2.5">
           {[
@@ -73,6 +73,13 @@ function PunchOutNoteModal({
             {record.notes}
           </p>
         </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="w-full py-2.5 rounded-lg bg-[#f1f4f9] hover:bg-[#e2e7f0] text-[#4a5568] text-sm font-semibold transition-colors press-effect"
+        >
+          Close
+        </button>
       </div>
     </Modal>
   );

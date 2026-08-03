@@ -7,7 +7,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils/utils";
 import toast from "react-hot-toast";
-import { Modal } from "@/components/ui/Modal";
 import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
 
 // --- Types ----------------------------------------------------------------------
@@ -447,11 +446,11 @@ function VisitConflictPanel({
 export default function LeavePage() {
   const [actionLoading, setActionLoading] = useState(false);
 
-  // Punch-out notes step (optional). Clicking Punch Out opens this prompt;
-  // the actual punch-out request is only sent from here, so the "one punch-out
-  // per day" rule is completely untouched — there is still exactly one call.
-  const [showPunchOutNotes, setShowPunchOutNotes] = useState(false);
+  // Optional punch-out note. Punch Out itself is immediate and unchanged; this
+  // is a SEPARATE step submitted afterwards from the inline Notes section, so
+  // nothing ever stands between the executive and punching out.
   const [punchOutNotes, setPunchOutNotes] = useState("");
+  const [sendingNotes, setSendingNotes] = useState(false);
 
   // Leave form state
   const [selectedDate, setSelectedDate] = useState("");
@@ -538,17 +537,32 @@ export default function LeavePage() {
   const handlePunchOut = async () => {
     setActionLoading(true);
     try {
-      const res = await fetch("/api/attendance/punch-out", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notes: punchOutNotes.trim() }),
-      });
+      const res = await fetch("/api/attendance/punch-out", { method: "POST" });
       if (!res.ok) { const j = await res.json() as { error: string }; toast.error(j.error); return; }
       toast.success("Punched out successfully!");
-      setShowPunchOutNotes(false);
-      setPunchOutNotes("");
       await fetchAll();
     } finally { setActionLoading(false); }
+  };
+
+  // Sends today's optional note. Separate call, after punch-out has completed.
+  const handleSendNotes = async () => {
+    const text = punchOutNotes.trim();
+    if (!text) { toast.error("Please type a note first"); return; }
+    setSendingNotes(true);
+    try {
+      const res = await fetch("/api/attendance", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: text }),
+      });
+      const j = await res.json() as { error?: string };
+      if (!res.ok) { toast.error(j.error ?? "Failed to send note"); return; }
+      toast.success("Note sent!");
+      setPunchOutNotes("");
+      // Refresh so the saved note replaces the input — this is also what makes
+      // the note visible to the admin without anyone hitting refresh.
+      await fetchAll();
+    } finally { setSendingNotes(false); }
   };
 
   // --- Leave submit (no conflict) -------------------------------------------
@@ -635,54 +649,6 @@ export default function LeavePage() {
   return (
     <div className="animate-in space-y-5">
 
-      {/* --- Punch Out notes (optional) ----------------------------------------- */}
-      <Modal
-        isOpen={showPunchOutNotes}
-        onClose={() => { if (!actionLoading) { setShowPunchOutNotes(false); setPunchOutNotes(""); } }}
-        title="Punch Out"
-        size="sm"
-        overlayClassName="pb-16 sm:pb-0"
-      >
-        <div className="p-5 space-y-4">
-          <p className="text-xs text-[#8896a9] leading-relaxed">
-            Add a note about today if you want to — worked overtime, client asked for extra
-            verification, delayed due to travel, and so on. This is optional.
-          </p>
-          <div>
-            <label className="text-xs font-semibold text-[#4a5568] mb-1 block">
-              Notes <span className="text-[#8896a9] font-normal">(optional)</span>
-            </label>
-            <textarea
-              autoFocus
-              value={punchOutNotes}
-              onChange={(e) => setPunchOutNotes(e.target.value)}
-              placeholder="e.g. Worked overtime — client requested extra verification"
-              rows={4}
-              maxLength={2000}
-              className="w-full border border-[#e2e7f0] rounded-lg px-3 py-2.5 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30 resize-none"
-            />
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => { setShowPunchOutNotes(false); setPunchOutNotes(""); }}
-              disabled={actionLoading}
-              className="flex-1 py-2.5 rounded-xl bg-[#f1f4f9] hover:bg-[#e2e7f0] text-[#4a5568] text-sm font-bold transition-colors press-effect disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handlePunchOut}
-              disabled={actionLoading}
-              className="flex-1 py-2.5 rounded-xl bg-[#ff944d] hover:bg-orange-500 text-white text-sm font-bold transition-colors press-effect disabled:opacity-50"
-            >
-              {actionLoading ? "…" : "Confirm Punch Out"}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
       {/* --- Incoming delegation requests (if any) ------------------------------ */}
       {!loading && incomingDelegations.length > 0 && (
         <div className="space-y-3">
@@ -736,7 +702,7 @@ export default function LeavePage() {
         <div className="flex justify-center pb-5">
           {!loading && !hasPunchedOut && (
             <button
-              onClick={hasPunchedIn ? () => setShowPunchOutNotes(true) : handlePunchIn}
+              onClick={hasPunchedIn ? handlePunchOut : handlePunchIn}
               disabled={actionLoading}
               className={cn(
                 "px-8 py-3 rounded-xl font-bold text-sm transition-all press-effect shadow-md",
@@ -766,6 +732,44 @@ export default function LeavePage() {
           </div>
         )}
       </div>
+
+      {/* --- Punch-out Notes (optional) ------------------------------------------
+           Appears inline, immediately below the Punch Out button, only once the
+           punch-out has completed and only while no note has been sent yet.
+           No popup, no redirect. Sending it hides this section, which is what
+           enforces one note per attendance record. */}
+      {!loading && hasPunchedOut && !today!.notes && (
+        <div className="bg-white border border-[#e2e7f0] rounded-xl overflow-hidden shadow-sm">
+          <div className="px-4 py-3 border-b border-[#f1f4f9] flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-green-600" />
+            <h2 className="text-sm font-bold text-[#0f1829]">Punch Out Successful</h2>
+          </div>
+          <div className="p-4 space-y-3">
+            <label className="text-xs font-semibold text-[#4a5568] block">
+              Notes <span className="text-[#8896a9] font-normal">(optional)</span>
+            </label>
+            <textarea
+              value={punchOutNotes}
+              onChange={(e) => setPunchOutNotes(e.target.value)}
+              placeholder="e.g. Worked 30 minutes extra to finish the client meeting"
+              rows={3}
+              maxLength={2000}
+              disabled={sendingNotes}
+              className="w-full border border-[#e2e7f0] rounded-lg px-3 py-2.5 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30 resize-none disabled:opacity-60"
+            />
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={handleSendNotes}
+                disabled={sendingNotes || !punchOutNotes.trim()}
+                className="px-5 py-2.5 rounded-xl bg-[#25488e] hover:bg-[#1e3a72] text-white text-sm font-bold transition-colors press-effect disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {sendingNotes ? "Sending…" : "Send Notes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* --- Attendance History ---------------------------------------------------- */}
       {!loading && (attendance?.history?.length ?? 0) > 0 && (
