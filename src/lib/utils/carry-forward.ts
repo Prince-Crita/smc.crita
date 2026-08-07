@@ -1,6 +1,10 @@
 import { prisma } from "@/lib/db/prisma";
 import { Task, Subtask, Visit } from "@prisma/client";
-import { createVisitForClient } from "@/lib/utils/create-visit";
+import {
+  createVisitForClient,
+  CARRY_FORWARD_SUBTASKS_ONLY_MARKER,
+  isSubtaskOnlyCarryForwardVisit,
+} from "@/lib/utils/create-visit";
 import { toMidnightIST } from "@/lib/utils/attendance";
 
 interface TaskWithSubtasks extends Task {
@@ -18,6 +22,11 @@ interface VisitWithTasks extends Visit {
 // SEPARATE origin (Business Rule 1). A visit can be flagged as carry-forward
 // for either reason, or both — see isCarryForwardVisit().
 export const CARRY_FORWARD_NOTE_PREFIX = "[CARRY-FORWARD:";
+
+// Rule-2 marker — defined in create-visit.ts (which this module already
+// imports) so that create-visit can use it without an import cycle.
+// Re-exported here because carry-forward is its conceptual home.
+export { CARRY_FORWARD_SUBTASKS_ONLY_MARKER, isSubtaskOnlyCarryForwardVisit };
 
 // Written by the reschedule flow when the admin chooses "Carry Forward: No".
 // Records the date the visit was moved AWAY from, so the missed-weekly check
@@ -219,7 +228,9 @@ export async function executeCarryForward(
       closedByUserId,
       {
         scheduledDate: targetDate,
-        notes: `${CARRY_FORWARD_NOTE_PREFIX} Incomplete items from ${closedVisit.visitNumber}]`,
+        // Both markers: the first drives the existing carry-forward badge, the
+        // second pins this visit as Rule 2 so nothing ever scaffolds it.
+        notes: `${CARRY_FORWARD_NOTE_PREFIX} Incomplete items from ${closedVisit.visitNumber}] ${CARRY_FORWARD_SUBTASKS_ONLY_MARKER}`,
         skipActiveDuplicateGuard: true,
         skipTaskScaffolding: true,
       }
@@ -391,7 +402,20 @@ export async function checkAndCreateMissedWeeklyVisits(): Promise<{ checked: num
   // scan and pages opened slowly. All the data needed to decide is now
   // fetched in 4 constant queries and evaluated in memory; only clients that
   // actually need a carry-forward visit created (rare) touch the DB again.
-  const [activeClients, visitedLastWeekRows, handledRows, priorVisitRows, rescheduledAwayRows] = await Promise.all([
+  // End of the destination week (the current week), used by the duplicate
+  // guard below.
+  const thisSunday = new Date(thisMonday);
+  thisSunday.setUTCDate(thisSunday.getUTCDate() + 6);
+  thisSunday.setUTCHours(23, 59, 59, 999);
+
+  const [
+    activeClients,
+    visitedLastWeekRows,
+    handledRows,
+    priorVisitRows,
+    rescheduledAwayRows,
+    visitedThisWeekRows,
+  ] = await Promise.all([
     prisma.client.findMany({
       where: { isArchived: false },
       select: { id: true, name: true },
@@ -419,6 +443,14 @@ export async function checkAndCreateMissedWeeklyVisits(): Promise<{ checked: num
       where: { notes: { contains: RESCHEDULED_FROM_NOTE_PREFIX } },
       select: { clientId: true, notes: true },
     }),
+    // Clients that ALREADY have a visit in the destination week. Rule 1 must
+    // not add a second one on top of it — that would be a duplicate
+    // carry-forward visit for the same week.
+    prisma.visit.findMany({
+      where: { scheduledDate: { gte: thisMonday, lte: thisSunday } },
+      select: { clientId: true },
+      distinct: ["clientId"],
+    }),
   ]);
 
   const visitedLastWeekSet = new Set(visitedLastWeekRows.map((r) => r.clientId));
@@ -434,6 +466,7 @@ export async function checkAndCreateMissedWeeklyVisits(): Promise<{ checked: num
     }
   }
   const handledSet = new Set(handledRows.map((r) => r.clientId));
+  const visitedThisWeekSet = new Set(visitedThisWeekRows.map((r) => r.clientId));
   const priorVisitByClient = new Map(priorVisitRows.map((r) => [r.clientId, r]));
 
   let created = 0;
@@ -444,6 +477,11 @@ export async function checkAndCreateMissedWeeklyVisits(): Promise<{ checked: num
 
     // Idempotency guard — has this exact missed week already been handled?
     if (handledSet.has(client.id)) continue;
+
+    // Duplicate guard — a visit already exists in the destination week, so the
+    // client's work for that week is already represented. Reuse it rather than
+    // creating a second, competing visit.
+    if (visitedThisWeekSet.has(client.id)) continue;
 
     // Infer the client's usual weekday/time/executive from their most
     // recent visit BEFORE the missed week. Clients with zero prior history

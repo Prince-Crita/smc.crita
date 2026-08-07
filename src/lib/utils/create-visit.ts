@@ -22,6 +22,34 @@
 
 import { prisma } from "@/lib/db/prisma";
 
+// ─── Rule 2 marker: subtask-only carry-forward visit ───────────────────────
+// Distinguishes the TWO carry-forward rules, which must stay independent:
+//
+//   Rule 1 - the client had NO visit at all during a week. The whole planned
+//            visit moves to the next week WITH its full task structure
+//            (checkAndCreateMissedWeeklyVisits → normal scaffolding).
+//
+//   Rule 2 - the client HAD a visit but some subtasks were missed. Only those
+//            subtasks move to the next week (executeCarryForward →
+//            skipTaskScaffolding). The visit deliberately holds nothing else.
+//
+// Without this marker the two rules bleed into each other: a Rule-2 visit is
+// just another PENDING visit, so syncClientPendingVisits would scaffold the
+// client's entire task configuration into it on the next task-config change,
+// silently turning a 2-subtask carry-forward back into a full visit.
+//
+// Lives here (not in carry-forward.ts) purely to avoid an import cycle:
+// carry-forward.ts already imports this module, and re-exports these two.
+export const CARRY_FORWARD_SUBTASKS_ONLY_MARKER = "[CF-SUBTASKS-ONLY]";
+
+/**
+ * True for a Rule-2 visit: it must contain ONLY carried subtasks and must
+ * never be back-filled with the client's task configuration.
+ */
+export function isSubtaskOnlyCarryForwardVisit(visit: { notes: string | null }): boolean {
+  return !!visit.notes && visit.notes.includes(CARRY_FORWARD_SUBTASKS_ONLY_MARKER);
+}
+
 // ─── Default task type definitions ────────────────────────────────────────────
 
 export const DEFAULT_TASK_TYPES = [
@@ -196,6 +224,13 @@ export async function syncClientPendingVisits(clientId: string): Promise<{ visit
   const planByType = new Map(plan.map((p) => [p.type, p]));
 
   for (const visit of pendingVisits) {
+    // Rule-2 carry-forward visits hold ONLY the subtasks that were missed the
+    // previous week. Scaffolding the client's task configuration into them
+    // would rebuild the whole visit and defeat subtask-level carry-forward
+    // entirely, so they are never synced. Rule-1 missed-weekly visits are
+    // normal full visits and DO get synced (they carry no such marker).
+    if (isSubtaskOnlyCarryForwardVisit(visit)) continue;
+
     const existingByType = new Map(visit.tasks.map((t) => [t.taskType, t]));
 
     // 1. Ensure every planned task exists with the current title/order/subtasks
