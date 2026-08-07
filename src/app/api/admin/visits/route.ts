@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { isAdminRole } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/prisma";
-import { getSubtaskTotals } from "@/lib/utils/visit-status";
+import { getSubtaskTotals, sortVisitsForDisplay } from "@/lib/utils/visit-status";
 import { getApprovedLeave } from "@/lib/utils/leave-check";
 import { isCarryForwardVisit } from "@/lib/utils/carry-forward";
 import { resolveClientTaskPlan, createTasksWithSubtasks } from "@/lib/utils/create-visit";
@@ -55,6 +55,7 @@ export async function GET(request: NextRequest) {
           visitNumber:    true,
           status:         true,
           scheduledDate:  true,
+          openedAt:       true,
           closedAt:       true,
           executiveId:    true,
           notes:          true,
@@ -103,11 +104,14 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    // Apply display-status filter in memory (after progress calculation)
-    const visits =
+    // Apply display-status filter in memory (after progress calculation),
+    // then the canonical display order: pending soonest-first, in-progress and
+    // closed most-recent-first.
+    const visits = sortVisitsForDisplay(
       displayStatusFilter
         ? visitsWithProgress.filter((v: any) => v.displayStatus === displayStatusFilter)
-        : visitsWithProgress;
+        : visitsWithProgress
+    );
 
     // Stats based on displayStatus (progress), NOT raw DB status
     const stats = {

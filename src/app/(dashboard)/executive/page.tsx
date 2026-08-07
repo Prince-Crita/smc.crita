@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, memo } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo, memo } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import {
@@ -10,6 +10,7 @@ import {
 import { formatDate, getProgressColor, cn } from "@/lib/utils/utils";
 import { Modal } from "@/components/ui/Modal";
 import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
+import { markVisitsSeen } from "@/lib/utils/new-visits";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -52,7 +53,7 @@ function statusLabel(status: string) {
 
 // ─── Visit Card (memoized) ─────────────────────────────────────────────────────
 
-const VisitCard = memo(function VisitCard({ visit }: { visit: VisitSummary }) {
+const VisitCard = memo(function VisitCard({ visit, isNew }: { visit: VisitSummary; isNew?: boolean }) {
   const displayStatus = getDS(visit);
   const pct = visit.progress;
 
@@ -76,9 +77,17 @@ const VisitCard = memo(function VisitCard({ visit }: { visit: VisitSummary }) {
       {/* Top row */}
       <div className="flex items-start justify-between gap-2 mb-3">
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-[#0f1829] group-hover:text-[#25488e] transition-colors truncate">
-            {visit.client.name}
-          </p>
+          <div className="flex items-center gap-2 min-w-0">
+            <p className="text-sm font-semibold text-[#0f1829] group-hover:text-[#25488e] transition-colors truncate">
+              {visit.client.name}
+            </p>
+            {/* Transient "newly assigned" notice — visual only, never a status */}
+            {isNew && (
+              <span className="flex-shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-[#800040] text-white">
+                NEW
+              </span>
+            )}
+          </div>
           <p className="text-xs text-[#8896a9] mt-0.5 truncate">{visit.client.contactPerson}</p>
         </div>
         <span className={cn(
@@ -144,10 +153,12 @@ const VisitCard = memo(function VisitCard({ visit }: { visit: VisitSummary }) {
 const DrillDownPanel = memo(function DrillDownPanel({
   filter,
   visits,
+  newVisitIds,
   onClose,
 }: {
   filter: StatusFilter;
   visits: VisitSummary[];
+  newVisitIds: Set<string>;
   onClose: () => void;
 }) {
   const titles: Record<StatusFilter, string> = {
@@ -189,7 +200,7 @@ const DrillDownPanel = memo(function DrillDownPanel({
         ) : (
           <div className="space-y-3">
             {filtered.map((v) => (
-              <VisitCard key={v.id} visit={v} />
+              <VisitCard key={v.id} visit={v} isNew={newVisitIds.has(v.id)} />
             ))}
           </div>
         )}
@@ -216,11 +227,24 @@ export default function ExecutiveDashboard() {
     revalidateOnFocus: true,
     revalidateOnVisible: true,
   });
-  const visits = data ?? [];
+  // Memoized so it keeps a stable identity between renders — the effects and
+  // memos below depend on it, and `data ?? []` would otherwise be a new array
+  // on every render.
+  const visits = useMemo(() => data ?? [], [data]);
 
   useEffect(() => {
     if (error) toast.error("Failed to load dashboard");
   }, [error]);
+
+  // Visits newly assigned since this device last looked. Marked seen on first
+  // render, so the badge shows once and clears on refresh or navigation.
+  const [newVisitIds, setNewVisitIds] = useState<Set<string>>(new Set());
+  const markedRef = useRef(false);
+  useEffect(() => {
+    if (markedRef.current || visits.length === 0) return;
+    markedRef.current = true;
+    setNewVisitIds(markVisitsSeen(visits.map((v) => v.id)));
+  }, [visits]);
 
   const { pendingVisits, inProgressVisits, closedVisits, carryForwardTotal } = useMemo(() => {
     const pending    = visits.filter((v) => getDS(v) === "PENDING");
@@ -369,7 +393,7 @@ export default function ExecutiveDashboard() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {inProgressVisits.slice(0, 4).map((visit) => (
-              <VisitCard key={visit.id} visit={visit} />
+              <VisitCard key={visit.id} visit={visit} isNew={newVisitIds.has(visit.id)} />
             ))}
           </div>
         </div>
@@ -392,7 +416,7 @@ export default function ExecutiveDashboard() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {pendingVisits.slice(0, 4).map((visit) => (
-              <VisitCard key={visit.id} visit={visit} />
+              <VisitCard key={visit.id} visit={visit} isNew={newVisitIds.has(visit.id)} />
             ))}
           </div>
         </div>
@@ -406,7 +430,7 @@ export default function ExecutiveDashboard() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {closedVisits.slice(0, 4).map((visit) => (
-              <VisitCard key={visit.id} visit={visit} />
+              <VisitCard key={visit.id} visit={visit} isNew={newVisitIds.has(visit.id)} />
             ))}
           </div>
         </div>
@@ -430,6 +454,7 @@ export default function ExecutiveDashboard() {
         <DrillDownPanel
           filter={statusFilter}
           visits={visits}
+          newVisitIds={newVisitIds}
           onClose={() => setShowDrillDown(false)}
         />
       )}

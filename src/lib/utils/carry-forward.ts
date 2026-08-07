@@ -53,6 +53,22 @@ export function hasEndDatePassed(visit: { scheduledDate: Date; endDate?: Date | 
 }
 
 /**
+ * The corresponding day exactly ONE WEEK after `date`, preserving the weekday
+ * and the time of day: Wed 15 July 09:00 → Wed 22 July 09:00.
+ *
+ * This is the destination rule for subtask carry-forward. Adding 7 days is
+ * what guarantees both required properties at once — the weekday is preserved
+ * (7 ≡ 0 mod 7) and the result can never fall inside the source visit's own
+ * week — which is why the offset is fixed at 7 rather than "the next visit
+ * after this one".
+ */
+export function getNextWeekSameWeekday(date: Date): Date {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + 7);
+  return next;
+}
+
+/**
  * Calculate progress percentage for a visit based on completed subtasks
  */
 export function calculateProgress(tasks: TaskWithSubtasks[]): {
@@ -157,12 +173,24 @@ export async function executeCarryForward(
     return { carriedCount: 0, nextVisitId: null };
   }
 
-  // Find the next pending/upcoming visit for the same client
+  // ── Destination: NEXT WEEK, SAME WEEKDAY ─────────────────────────────────
+  // Carry-forward must never land inside the source visit's own week. The
+  // destination is the corresponding day one week later (Wed 15th → Wed 22nd),
+  // which is the app's existing weekly cadence. Previously this took the
+  // client's next PENDING/OPEN visit by date, which could easily be Thursday
+  // or Friday of the SAME week.
+  const targetDate = getNextWeekSameWeekday(closedVisit.scheduledDate);
+  const targetDayStart = toMidnightIST(targetDate);
+  const targetDayEnd = new Date(targetDayStart.getTime() + 24 * 60 * 60 * 1000);
+
+  // Reuse the client's real visit for that day if one is already scheduled -
+  // the carried subtasks then sit alongside that visit's normal task list.
   let nextVisit = await prisma.visit.findFirst({
     where: {
       clientId: closedVisit.clientId,
       status: { in: ["PENDING", "OPEN"] },
-      scheduledDate: { gt: closedVisit.scheduledDate },
+      scheduledDate: { gte: targetDayStart, lt: targetDayEnd },
+      id: { not: closedVisit.id },
     },
     orderBy: { scheduledDate: "asc" },
     include: {
@@ -172,28 +200,28 @@ export async function executeCarryForward(
     },
   });
 
-  // No upcoming visit yet? Auto-create one so incomplete subtasks are NEVER
-  // silently dropped. Previously this returned early without persisting
-  // anything, so the Carry-Forward page showed nothing even though the
-  // closed visit had incomplete items. The new visit is scheduled exactly
-  // one week after the closed visit (same weekday/time - the app's weekly
-  // cadence), for the same executive.
+  // Nothing scheduled that day? Create a carry-forward-only visit so the
+  // incomplete subtasks are NEVER silently dropped.
+  //
+  // skipTaskScaffolding is what fixes the "whole visit was duplicated" bug:
+  // this visit starts EMPTY and receives only the incomplete subtasks below,
+  // grouped under the main tasks they came from. It must not be pre-filled
+  // with the client's full task configuration.
   //
   // skipActiveDuplicateGuard is REQUIRED here: at this point the visit being
   // closed is still status=OPEN in the DB, so the duplicate guard would
   // return the closing visit itself and we'd carry subtasks into the very
   // visit that is being closed.
   if (!nextVisit) {
-    const nextDate = new Date(closedVisit.scheduledDate);
-    nextDate.setUTCDate(nextDate.getUTCDate() + 7);
     const { visitId } = await createVisitForClient(
       closedVisit.clientId,
       closedVisit.executiveId,
       closedByUserId,
       {
-        scheduledDate: nextDate,
+        scheduledDate: targetDate,
         notes: `${CARRY_FORWARD_NOTE_PREFIX} Incomplete items from ${closedVisit.visitNumber}]`,
         skipActiveDuplicateGuard: true,
+        skipTaskScaffolding: true,
       }
     );
     nextVisit = await prisma.visit.findUnique({

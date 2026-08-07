@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/db/prisma";
-import { getSubtaskTotals } from "@/lib/utils/visit-status";
+import { getSubtaskTotals, sortVisitsForDisplay } from "@/lib/utils/visit-status";
 import { isCarryForwardVisit } from "@/lib/utils/carry-forward";
 
 // --- GET /api/visits -------------------------------------------------------------
@@ -29,6 +29,8 @@ export async function GET(request: NextRequest) {
         status:        true,
         scheduledDate: true,
         endDate:       true,
+        openedAt:      true,
+        closedAt:      true,
         notes:         true,
         client: {
           select: { name: true, code: true, contactPerson: true },
@@ -72,7 +74,10 @@ export async function GET(request: NextRequest) {
       ? visitsWithProgress.filter((v) => v.displayStatus === displayStatusFilter)
       : visitsWithProgress;
 
-    return NextResponse.json({ visits: filtered });
+    // Canonical display order: pending soonest-first, in-progress and closed
+    // most-recent-first. The raw `scheduledDate desc` from the query put the
+    // 31st before the 16th in the executive's Pending list.
+    return NextResponse.json({ visits: sortVisitsForDisplay(filtered) });
   } catch (error) {
     console.error("Get visits error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

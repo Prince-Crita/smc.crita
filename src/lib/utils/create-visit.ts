@@ -328,6 +328,20 @@ export interface CreateVisitForClientOptions {
    * instead of this guard. Set true to bypass it.
    */
   skipActiveDuplicateGuard?: boolean;
+  /**
+   * Create the Visit row WITHOUT scaffolding the client's task configuration
+   * (no main tasks, no template subtasks) — an intentionally empty visit.
+   *
+   * Used only by subtask-level carry-forward: that visit must contain ONLY
+   * the incomplete subtasks being carried over, grouped under the main tasks
+   * they came from. Scaffolding the full plan here is what made carry-forward
+   * appear to duplicate the whole visit (every main task and every completed
+   * subtask reappeared the following week).
+   *
+   * Every other caller (new client, repeat visit, missed-weekly) must leave
+   * this false so a normal visit still gets its full task list.
+   */
+  skipTaskScaffolding?: boolean;
 }
 
 export async function createVisitForClient(
@@ -336,7 +350,7 @@ export async function createVisitForClient(
   adminUserId: string,
   options: CreateVisitForClientOptions = {}
 ): Promise<{ visitId: string; visitNumber: string }> {
-  const { scheduledDate, endDate, notes, skipActiveDuplicateGuard } = options;
+  const { scheduledDate, endDate, notes, skipActiveDuplicateGuard, skipTaskScaffolding } = options;
 
   // ── Guard: don't create duplicate pending/open visits ────────────────────
   if (!skipActiveDuplicateGuard) {
@@ -381,7 +395,8 @@ export async function createVisitForClient(
   const visitNumber = `${prefix}-${String(seq).padStart(3, "0")}`;
 
   // ── Resolve the client's effective task plan (config + templates) ────────
-  const orderedTaskTypes = await resolveClientTaskPlan(clientId);
+  // Skipped entirely for a carry-forward-only visit, which must start empty.
+  const orderedTaskTypes = skipTaskScaffolding ? [] : await resolveClientTaskPlan(clientId);
 
   // ── STEP 1: Create the Visit record ─────────────────────────────────────
   // Plain write — no transaction wrapper — fully compatible with all Prisma adapters.

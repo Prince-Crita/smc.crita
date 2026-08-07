@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, memo } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo, memo } from "react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import {
@@ -10,6 +10,7 @@ import {
 import { formatDate, cn } from "@/lib/utils/utils";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
+import { markVisitsSeen } from "@/lib/utils/new-visits";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -61,7 +62,7 @@ function progressBarColor(pct: number) {
 
 // ─── Visit Card (memoized) ─────────────────────────────────────────────────────
 
-const VisitCard = memo(function VisitCard({ visit }: { visit: Visit }) {
+const VisitCard = memo(function VisitCard({ visit, isNew }: { visit: Visit; isNew?: boolean }) {
   const displayStatus = visit.displayStatus ?? (
     visit.progress === 0 ? "PENDING" : visit.progress < 100 ? "IN_PROGRESS" : "CLOSED"
   );
@@ -78,9 +79,17 @@ const VisitCard = memo(function VisitCard({ visit }: { visit: Visit }) {
       {/* Top row */}
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="flex-1 min-w-0">
-          <p className="text-base font-semibold text-[#0f1829] group-hover:text-[#25488e] transition-colors leading-tight truncate">
-            {visit.client.name}
-          </p>
+          <div className="flex items-center gap-2 min-w-0">
+            <p className="text-base font-semibold text-[#0f1829] group-hover:text-[#25488e] transition-colors leading-tight truncate">
+              {visit.client.name}
+            </p>
+            {/* Transient "newly assigned" notice — visual only, never a status */}
+            {isNew && (
+              <span className="flex-shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-[#800040] text-white">
+                NEW
+              </span>
+            )}
+          </div>
           <p className="text-sm text-[#8896a9] mt-0.5 truncate">{visit.client.contactPerson}</p>
         </div>
         <span className={cn(
@@ -174,11 +183,25 @@ export default function ExecutiveVisitsPage() {
     revalidateOnFocus: true,
     revalidateOnVisible: true,
   });
-  const visits = data ?? [];
+  // Memoized so it keeps a stable identity between renders — the effects and
+  // memos below depend on it, and `data ?? []` would otherwise be a new array
+  // on every render.
+  const visits = useMemo(() => data ?? [], [data]);
 
   useEffect(() => {
     if (error) toast.error("Failed to load visits");
   }, [error]);
+
+  // Visits newly assigned since this device last looked. Computed once per
+  // mount, and the ids are marked seen immediately — so the badge shows once
+  // and is gone after a refresh or a navigation away and back.
+  const [newVisitIds, setNewVisitIds] = useState<Set<string>>(new Set());
+  const markedRef = useRef(false);
+  useEffect(() => {
+    if (markedRef.current || visits.length === 0) return;
+    markedRef.current = true;
+    setNewVisitIds(markVisitsSeen(visits.map((v) => v.id)));
+  }, [visits]);
 
   const getDS = useCallback((v: Visit) =>
     v.displayStatus ?? (v.progress === 0 ? "PENDING" : v.progress < 100 ? "IN_PROGRESS" : "CLOSED"),
@@ -247,7 +270,7 @@ export default function ExecutiveVisitsPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filteredVisits.map((visit) => (
-            <VisitCard key={visit.id} visit={visit} />
+            <VisitCard key={visit.id} visit={visit} isNew={newVisitIds.has(visit.id)} />
           ))}
         </div>
       )}
