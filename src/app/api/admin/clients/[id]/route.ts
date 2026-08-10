@@ -181,11 +181,20 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 }
 
 // ─── DELETE /api/admin/clients/[id] ───────────────────────────────────────────
-// Permanently deletes a client. Blocked if the client has any visits (which
-// carry the report/task/subtask history) — Visit.clientId is required with no
-// cascade-delete from Client, so any visit history would block this at the
-// database level anyway. ClientTaskType/SubtaskTemplate rows cascade-delete
-// automatically via the schema.
+// Permanently deletes a client together with its full visit history.
+//
+// Only some of the chain cascades at the database level, so the rest is removed
+// here in foreign-key-safe order:
+//   Client   → ClientTaskType, SubtaskTemplate   cascade (schema)
+//   Visit    → Task → Subtask                    cascade (schema)
+//   Visit    ← ActivityLog / VisitReassignment / VisitDelegation
+//                                                NO cascade — deleted below
+//   Subtask  ← Subtask.sourceSubtaskId (carry-forward)
+//                                                NO cascade — cleared below
+// Everything runs in one transaction, so a failure part-way leaves the client
+// and its history exactly as they were rather than half-deleted.
+//
+// Admin-only, unchanged: executives never reach this handler.
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getAuthUser(request);
@@ -194,28 +203,64 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { id } = await params;
 
   try {
-    const existing = await prisma.client.findUnique({ where: { id } });
+    const existing = await prisma.client.findUnique({ where: { id }, select: { id: true, name: true } });
     if (!existing) return NextResponse.json({ error: "Client not found" }, { status: 404 });
 
-    const visitCount = await prisma.visit.count({ where: { clientId: id } });
-    if (visitCount > 0) {
-      return NextResponse.json(
-        { error: "Client has visits, reports, or task history and cannot be deleted." },
-        { status: 409 }
-      );
-    }
+    const removed = await prisma.$transaction(async (tx) => {
+      const visits = await tx.visit.findMany({ where: { clientId: id }, select: { id: true } });
+      const visitIds = visits.map((v) => v.id);
 
-    await prisma.client.delete({ where: { id } });
+      let taskCount = 0;
+      let subtaskCount = 0;
+      let activityLogs = 0;
+      let reassignments = 0;
+      let delegations = 0;
+
+      if (visitIds.length > 0) {
+        const tasks = await tx.task.findMany({ where: { visitId: { in: visitIds } }, select: { id: true } });
+        const taskIds = tasks.map((t) => t.id);
+        taskCount = taskIds.length;
+
+        const subtasks = taskIds.length
+          ? await tx.subtask.findMany({ where: { taskId: { in: taskIds } }, select: { id: true } })
+          : [];
+        const subtaskIds = subtasks.map((s) => s.id);
+        subtaskCount = subtaskIds.length;
+
+        // A carry-forward subtask points back at the subtask it came from via
+        // sourceSubtaskId, which has no cascade rule. Clear every pointer INTO
+        // the rows about to be deleted first, otherwise the Task→Subtask
+        // cascade below trips that foreign key.
+        if (subtaskIds.length > 0) {
+          await tx.subtask.updateMany({
+            where: { sourceSubtaskId: { in: subtaskIds } },
+            data: { sourceSubtaskId: null },
+          });
+        }
+
+        activityLogs = (await tx.activityLog.deleteMany({ where: { visitId: { in: visitIds } } })).count;
+        reassignments = (await tx.visitReassignment.deleteMany({ where: { visitId: { in: visitIds } } })).count;
+        delegations = (await tx.visitDelegation.deleteMany({ where: { visitId: { in: visitIds } } })).count;
+
+        // Tasks and their subtasks cascade from the visit.
+        await tx.visit.deleteMany({ where: { id: { in: visitIds } } });
+      }
+
+      // ClientTaskType and SubtaskTemplate cascade from the client.
+      await tx.client.delete({ where: { id } });
+
+      return { visits: visitIds.length, tasks: taskCount, subtasks: subtaskCount, activityLogs, reassignments, delegations };
+    });
 
     await prisma.activityLog.create({
       data: {
         userId: user.userId,
         action: "CLIENT_DELETED",
-        metadata: { clientId: id, clientName: existing.name, deletedBy: user.name },
+        metadata: { clientId: id, clientName: existing.name, deletedBy: user.name, removed },
       },
     });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, removed });
   } catch (error) {
     console.error("Delete client error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
