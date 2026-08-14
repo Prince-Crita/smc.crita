@@ -15,6 +15,13 @@ import toast from "react-hot-toast";
 import { formatDate, cn } from "@/lib/utils/utils";
 import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
 
+/** Assignment of the source client's most recent visit (§3 duplicate preview). */
+interface PreviousAssignment {
+  visitType: "SOLO" | "TEAM";
+  teamLead: { id: string; name: string };
+  teamMembers: { id: string; name: string }[];
+}
+
 interface Client {
   id: string;
   name: string;
@@ -206,6 +213,13 @@ export default function ClientsPage() {
   // is created from it, so no follow-up "Edit Client" is ever needed.
   const [dupStartDate, setDupStartDate] = useState("");
   const [dupEndDate, setDupEndDate] = useState("");
+  // §3 — previous assignment shown before duplicating, plus the admin's choice
+  // to keep it or edit it. Editing here only affects the DUPLICATE.
+  const [dupPrevAssignment, setDupPrevAssignment] = useState<PreviousAssignment | null>(null);
+  const [dupEditAssignment, setDupEditAssignment] = useState(false);
+  const [dupVisitType, setDupVisitType] = useState<"SOLO" | "TEAM">("SOLO");
+  const [dupLeadId, setDupLeadId] = useState("");
+  const [dupMemberIds, setDupMemberIds] = useState<string[]>([]);
   const [dupDateError, setDupDateError] = useState("");
   const [duplicating, setDuplicating] = useState(false);
   // Carry-forward selection step: pending tasks from the source client's
@@ -313,12 +327,22 @@ export default function ClientsPage() {
     setDupPendingTasks([]);
     setDupPendingLoading(true);
     try {
-      const data = await fetchJSON<{ pendingTasks?: { taskType: string; title: string; incompleteCount: number }[] }>(
-        `/api/admin/clients/${client.id}/duplicate`
-      );
+      const data = await fetchJSON<{
+        pendingTasks?: { taskType: string; title: string; incompleteCount: number }[];
+        previousAssignment?: PreviousAssignment | null;
+      }>(`/api/admin/clients/${client.id}/duplicate`);
       setDupPendingTasks(data.pendingTasks ?? []);
+      // §3 — show the source visit's assignment so the admin can keep or edit it.
+      setDupPrevAssignment(data.previousAssignment ?? null);
+      setDupEditAssignment(false);
+      if (data.previousAssignment) {
+        setDupVisitType(data.previousAssignment.visitType);
+        setDupLeadId(data.previousAssignment.teamLead.id);
+        setDupMemberIds(data.previousAssignment.teamMembers.map((m) => m.id));
+      }
     } catch {
       setDupPendingTasks([]);
+      setDupPrevAssignment(null);
     } finally {
       setDupPendingLoading(false);
     }
@@ -343,6 +367,19 @@ export default function ClientsPage() {
     }
     setDupDateError("");
 
+    // Same rules the server enforces, surfaced before the request so the
+    // admin sees exactly what is missing instead of a generic failure.
+    if (dupEditAssignment) {
+      if (!dupLeadId) {
+        toast.error(dupVisitType === "TEAM" ? "Select a Team Lead" : "Select an executive");
+        return;
+      }
+      if (dupVisitType === "TEAM" && dupMemberIds.length === 0) {
+        toast.error("A Team Visit needs at least one team member besides the Team Lead");
+        return;
+      }
+    }
+
     setDuplicating(true);
     try {
       const res = await fetch(`/api/admin/clients/${duplicateClient.id}/duplicate`, {
@@ -353,19 +390,45 @@ export default function ClientsPage() {
           startDate: dupStartDate || null,
           endDate: dupEndDate || null,
           carryForwardTaskTypes: [...dupSelectedTypes],
+          // Only sent when the admin chose to edit; otherwise the duplicate
+          // keeps the source client's existing assignment.
+          ...(dupEditAssignment
+            ? {
+                assignment: {
+                  visitType: dupVisitType,
+                  executiveId: dupLeadId,
+                  ...(dupVisitType === "TEAM" ? { memberIds: dupMemberIds } : {}),
+                },
+              }
+            : {}),
         }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) { toast.error(data?.error || "Failed to duplicate client"); return; }
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        // Never swallow the real cause. A non-JSON body means the request
+        // never reached the handler (dev-server route error, proxy, auth
+        // redirect) — reporting a generic "Failed to duplicate client" there
+        // hid a routing failure behind what looked like a validation error.
+        toast.error(
+          data?.error ??
+            `Failed to duplicate client — server responded ${res.status} ${res.statusText}`
+        );
+        return;
+      }
       toast.success(`Client duplicated as "${dupName.trim()}"${data?.visitCreated ? ` · Visit ${data.visitCreated.visitNumber} created` : ""}`);
       setDuplicateClient(null);
       fetchAll();
-    } catch {
-      toast.error("Error duplicating client");
+    } catch (err) {
+      toast.error(err instanceof Error ? `Error duplicating client: ${err.message}` : "Error duplicating client");
     } finally {
       setDuplicating(false);
     }
-  }, [duplicateClient, dupName, dupStartDate, dupEndDate, dupSelectedTypes, fetchAll]);
+    // Every value read inside this handler must be a dependency. The
+    // assignment fields were missing, so the callback kept the values it was
+    // created with and the admin's "Edit Assignment" choice was silently
+    // dropped whenever they changed nothing else afterwards.
+  }, [duplicateClient, dupName, dupStartDate, dupEndDate, dupSelectedTypes,
+      dupEditAssignment, dupVisitType, dupLeadId, dupMemberIds, fetchAll]);
 
   return (
     <div className="space-y-6 animate-in">
@@ -536,6 +599,108 @@ export default function ClientsPage() {
           {dupDateError
             ? <p className="text-xs text-red-600 -mt-1">{dupDateError}</p>
             : <p className="text-xs text-[#8896a9] -mt-1">Leave empty to schedule the first visit for today.</p>}
+
+          {/* ── Previous assignment (§3) ─────────────────────────────────
+               Shown before duplicating. "Keep" reuses it as-is; "Edit" applies
+               a different assignment to the DUPLICATE only — the original
+               client is never modified either way. */}
+          {dupPrevAssignment && (
+            <div className="rounded-xl border border-[#e2e7f0] bg-[#f8f9fc] p-3">
+              <p className="text-xs text-[#8896a9] font-semibold mb-1.5">Previous Assignment</p>
+              <div className="text-sm text-[#0f1829] space-y-0.5">
+                <p>
+                  <span className="text-[#8896a9]">Visit Type:</span>{" "}
+                  {dupPrevAssignment.visitType === "TEAM" ? "Team Visit" : "Solo Visit"}
+                </p>
+                <p>
+                  <span className="text-[#8896a9]">
+                    {dupPrevAssignment.visitType === "TEAM" ? "Team Lead:" : "Executive:"}
+                  </span>{" "}
+                  {dupPrevAssignment.teamLead.name}
+                </p>
+                {dupPrevAssignment.visitType === "TEAM" && (
+                  <p>
+                    <span className="text-[#8896a9]">Team Members:</span>{" "}
+                    {dupPrevAssignment.teamMembers.map((m) => m.name).join(", ") || "—"}
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-2 mt-2.5">
+                <button
+                  type="button"
+                  onClick={() => setDupEditAssignment(false)}
+                  className={cn(
+                    "flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-colors",
+                    !dupEditAssignment
+                      ? "bg-[#25488e] text-white border-[#25488e]"
+                      : "bg-white text-[#4a5568] border-[#e2e7f0] hover:bg-[#f1f4f9]"
+                  )}
+                >
+                  Keep Existing Assignment
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDupEditAssignment(true)}
+                  className={cn(
+                    "flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-colors",
+                    dupEditAssignment
+                      ? "bg-[#25488e] text-white border-[#25488e]"
+                      : "bg-white text-[#4a5568] border-[#e2e7f0] hover:bg-[#f1f4f9]"
+                  )}
+                >
+                  Edit Assignment
+                </button>
+              </div>
+
+              {dupEditAssignment && (
+                <div className="mt-3 space-y-2.5 border-t border-[#e2e7f0] pt-3">
+                  <div className="flex gap-2">
+                    {(["SOLO", "TEAM"] as const).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => { setDupVisitType(t); setDupMemberIds([]); }}
+                        className={cn(
+                          "flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-colors",
+                          dupVisitType === t
+                            ? "bg-[#25488e] text-white border-[#25488e]"
+                            : "bg-white text-[#4a5568] border-[#e2e7f0] hover:bg-[#f1f4f9]"
+                        )}
+                      >
+                        {t === "SOLO" ? "Solo Visit" : "Team Visit"}
+                      </button>
+                    ))}
+                  </div>
+                  <select
+                    value={dupLeadId}
+                    onChange={(e) => { setDupLeadId(e.target.value); setDupMemberIds((p) => p.filter((id) => id !== e.target.value)); }}
+                    className="w-full border border-[#e2e7f0] rounded-lg px-3 py-2 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30"
+                  >
+                    <option value="">{dupVisitType === "TEAM" ? "Select Team Lead…" : "Select Executive…"}</option>
+                    {executives.map((ex) => <option key={ex.id} value={ex.id}>{ex.name}</option>)}
+                  </select>
+                  {dupVisitType === "TEAM" && (
+                    <div className="border border-[#e2e7f0] rounded-lg divide-y divide-[#f1f4f9] max-h-32 overflow-y-auto bg-white">
+                      {executives.filter((ex) => ex.id !== dupLeadId).map((ex) => {
+                        const checked = dupMemberIds.includes(ex.id);
+                        return (
+                          <label key={ex.id} className="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-[#f8fafc]">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => setDupMemberIds((p) => checked ? p.filter((id) => id !== ex.id) : [...p, ex.id])}
+                              className="w-4 h-4 accent-[#25488e]"
+                            />
+                            <span className="text-sm text-[#0f1829]">{ex.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ── Step 3: Carry Forward pending tasks ─────────────────────── */}
           <div>

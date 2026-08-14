@@ -3,6 +3,7 @@ import { getAuthUser } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/db/prisma";
 import { validateVisitClose, executeCarryForward, hasEndDatePassed } from "@/lib/utils/carry-forward";
 import { generateVisitSummary, VisitData } from "@/lib/utils/summary";
+import { canCloseVisit, canViewVisit } from "@/lib/utils/visit-access";
 import { sendEmail } from "@/lib/email/mailer";
 import { generateVisitSummaryEmail } from "@/lib/email/templates/visit-summary";
 import { Prisma } from "@prisma/client";
@@ -30,6 +31,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           },
         },
         executive: { select: { id: true, name: true, email: true } },
+        assignments: { select: { executiveId: true, role: true } },
         tasks: {
           include: { subtasks: true },
           orderBy: { orderIndex: "asc" },
@@ -38,7 +40,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     });
 
     if (!visit) return NextResponse.json({ error: "Visit not found" }, { status: 404 });
-    if (visit.executiveId !== user.userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    // Closing is owner-only: the solo executive, or the TEAM LEAD. A team
+    // member who can view and work the visit still cannot close it, and gets a
+    // message saying why rather than a bare "Forbidden".
+    if (!canCloseVisit(visit, user.userId)) {
+      const onTeam = canViewVisit(visit, user.userId);
+      return NextResponse.json(
+        {
+          error: onTeam
+            ? "Only the Team Lead can close this visit."
+            : "Forbidden",
+        },
+        { status: 403 }
+      );
+    }
     if (visit.status !== "OPEN") {
       return NextResponse.json({ error: "Only open visits can be closed" }, { status: 400 });
     }
@@ -49,19 +64,22 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: "Cannot close visit", validationErrors }, { status: 422 });
     }
 
-    // Carry-forward is generated ONLY after the visit's end date has passed
-    // (Business Rule - Case 1: end date not passed → no carry-forward yet).
-    // When the visit is closed early, the background sweep
-    // (processDueCarryForwards) picks up any remaining incomplete subtasks
-    // automatically once the end date passes. Closing late (window already
-    // over) carries immediately, same as before.
-    let carriedCount = 0;
-    let nextVisitId: string | null = null;
-    if (hasEndDatePassed(visit)) {
-      const result = await executeCarryForward(visit, user.userId);
-      carriedCount = result.carriedCount;
-      nextVisitId = result.nextVisitId;
+    // Carry-forward is NO LONGER created automatically on close (§7). Closing
+    // a visit with unfinished work now raises PENDING carry-forward REQUESTS,
+    // which an admin approves (and dates) from Admin → Carry Forward. Nothing
+    // is copied into any visit here.
+    const carryForwardRequests = visit.tasks.flatMap((t) =>
+      t.subtasks.filter((s) => !s.isCompleted && !s.isCarriedForward && !s.carryForwardApprovedAt)
+    );
+    if (carryForwardRequests.length > 0) {
+      await prisma.subtask.updateMany({
+        where: { id: { in: carryForwardRequests.map((s) => s.id) }, carryForwardRequestedAt: null },
+        data: { carryForwardRequestedAt: new Date() },
+      });
     }
+    // Reported in the summary as "awaiting admin approval", not as carried.
+    const carriedCount = 0;
+    const nextVisitId: string | null = null;
 
     // Generate visit summary
     const summary = generateVisitSummary(visit as unknown as VisitData, carriedCount);

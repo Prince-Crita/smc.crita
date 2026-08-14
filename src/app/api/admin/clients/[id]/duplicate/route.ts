@@ -35,6 +35,7 @@ import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { isAdminRole } from "@/lib/auth/roles";
 import { createVisitForClient } from "@/lib/utils/create-visit";
+import { applyAssignment, normalizeAssignment } from "@/lib/utils/visit-assignment";
 
 // ─── GET: pending tasks available for carry-forward selection ───────────────
 // Returns the source client's most recent visit and its main tasks that
@@ -60,6 +61,13 @@ export async function GET(
         visitNumber: true,
         scheduledDate: true,
         status: true,
+        // Previous assignment (§5) — shown before duplicating so the admin can
+        // keep it or edit it.
+        visitType: true,
+        executive: { select: { id: true, name: true } },
+        assignments: {
+          select: { role: true, executive: { select: { id: true, name: true } } },
+        },
         tasks: {
           orderBy: { orderIndex: "asc" },
           select: {
@@ -84,10 +92,22 @@ export async function GET(
         incompleteSubtasks: t.subtasks,
       }));
 
+    // §5 — "Previous Assignment" block for the Duplicate Client modal.
+    const previousAssignment = sourceVisit
+      ? {
+          visitType: sourceVisit.visitType,
+          teamLead: { id: sourceVisit.executive.id, name: sourceVisit.executive.name },
+          teamMembers: sourceVisit.assignments
+            .filter((a) => a.role !== "LEAD")
+            .map((a) => ({ id: a.executive.id, name: a.executive.name })),
+        }
+      : null;
+
     return NextResponse.json({
       sourceVisit: sourceVisit
         ? { id: sourceVisit.id, visitNumber: sourceVisit.visitNumber, scheduledDate: sourceVisit.scheduledDate, status: sourceVisit.status }
         : null,
+      previousAssignment,
       pendingTasks,
     });
   } catch (error) {
@@ -107,13 +127,16 @@ export async function POST(
 
   try {
     const body = await request.json().catch(() => ({}));
-    const { name, startDate, endDate, carryForwardTaskTypes } = body as {
+    const { name, startDate, endDate, carryForwardTaskTypes, assignment } = body as {
       name?: string;
       startDate?: string | null;
       endDate?: string | null;
       /** Main task types (from GET) whose incomplete subtasks should be
        *  carried into the duplicated visit as Carry Forward items. */
       carryForwardTaskTypes?: string[];
+      /** §5 — assignment for the duplicate. Omit to keep the source client's
+       *  assigned executive; send one to override it (Edit Assignment). */
+      assignment?: { visitType?: "SOLO" | "TEAM"; executiveId?: string; memberIds?: string[] };
     };
 
     if (!name?.trim()) return NextResponse.json({ error: "New client name is required" }, { status: 400 });
@@ -148,6 +171,20 @@ export async function POST(
       );
     }
 
+    // ── Validate the requested assignment BEFORE anything is written ────────
+    // This used to be validated after the client row, its subtask templates
+    // and its task configuration had already been created, so a rejected
+    // assignment (e.g. "Team Visit" with no members) returned 400 while
+    // leaving a fully-formed orphan client behind — and burned a client code
+    // on every retry. Nothing is created until the payload is known good.
+    const chosen = normalizeAssignment(
+      { visitType: assignment?.visitType, executiveId: assignment?.executiveId, memberIds: assignment?.memberIds },
+      source.assignedExecId ?? undefined
+    );
+    if (assignment && chosen.error) {
+      return NextResponse.json({ error: chosen.error }, { status: 400 });
+    }
+
     // ── Generate a unique code: SRC → SRC-2, SRC-3, ... ────────────────────
     const baseCode = source.code.replace(/-\d+$/, "");
     let newCode = "";
@@ -168,7 +205,12 @@ export async function POST(
         phone: source.phone,
         email: source.email,
         reportEmails: source.reportEmails,
-        assignedExecId: source.assignedExecId,
+        // The duplicate follows the assignment the admin confirmed in the
+        // modal: the chosen executive / team lead when they edited it, the
+        // source client's executive when they kept it. Without this the
+        // Clients list showed the duplicate under the OLD executive while its
+        // visit belonged to the new one.
+        assignedExecId: chosen.value?.leadId ?? source.assignedExecId,
         startDate: newStartDate,
         endDate: newEndDate,
       },
@@ -219,14 +261,26 @@ export async function POST(
     let visitInfo = null;
     let visitError: string | null = null;
     let carriedCount = 0;
-    if (newClient.assignedExecId) {
+    // §5 — assignment for the DUPLICATE (validated above, before any write).
+    // When the admin sends one it is used; when omitted, the duplicate keeps
+    // the source client's assigned executive exactly as before. Either way the
+    // ORIGINAL client's assignment is never written to — only `newClient` is
+    // touched.
+    const leadForVisit = chosen.value?.leadId ?? newClient.assignedExecId;
+
+    if (leadForVisit) {
       try {
-        visitInfo = await createVisitForClient(newClient.id, newClient.assignedExecId, user.userId, {
+        visitInfo = await createVisitForClient(newClient.id, leadForVisit, user.userId, {
           // The duplicate is a brand-new client row, so it can never have a
           // pre-existing active visit — the dates below are always applied.
           scheduledDate: newStartDate ?? undefined,
           endDate: newEndDate ?? undefined,
         });
+
+        // Apply the chosen SOLO/TEAM assignment to the freshly created visit.
+        if (visitInfo?.visitId && chosen.value?.visitType === "TEAM") {
+          await applyAssignment(prisma, visitInfo.visitId, chosen.value);
+        }
 
         // ── Selective carry-forward (admin-chosen pending tasks) ─────────
         // Only the SELECTED pending tasks from the source client's latest

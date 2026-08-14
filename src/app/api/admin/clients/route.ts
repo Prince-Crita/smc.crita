@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { isAdminRole } from "@/lib/auth/roles";
 import { createVisitForClient } from "@/lib/utils/create-visit";
+import { applyAssignment, normalizeAssignment } from "@/lib/utils/visit-assignment";
 
 
 export async function GET(request: NextRequest) {
@@ -136,6 +137,17 @@ export async function POST(request: NextRequest) {
           scheduledDate: client.startDate ?? undefined,
           endDate: client.endDate ?? undefined,
         });
+
+        // Apply the Solo/Team assignment chosen in Add Client to that visit.
+        // Solo needs nothing extra — the executive is already the visit owner.
+        if (visitInfo?.visitId && body.visitType === "TEAM") {
+          const normalized = normalizeAssignment(
+            { visitType: "TEAM", executiveId: assignedExecId, memberIds: body.memberIds },
+            assignedExecId
+          );
+          if (normalized.error) visitError = normalized.error;
+          else await applyAssignment(prisma, visitInfo.visitId, normalized.value);
+        }
       } catch (visitErr) {
         console.error("[create-visit] Failed to auto-create visit after client creation:", visitErr);
         visitError = visitErr instanceof Error ? visitErr.message : String(visitErr);

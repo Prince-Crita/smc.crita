@@ -23,6 +23,21 @@ enum VisitStatus {
   CANCELLED
 }
 
+// A visit is worked either by one executive (SOLO) or by a team (TEAM).
+// Visit.executiveId remains the single source of truth for "who owns this
+// visit": the solo executive, or the team LEAD. That keeps every existing
+// admin query, reassignment path and the lead-only close check working
+// unchanged — team membership is additive, held in VisitAssignment.
+enum VisitType {
+  SOLO
+  TEAM
+}
+
+enum VisitRole {
+  LEAD
+  MEMBER
+}
+
 // NOTE: TaskType enum kept for reference only.
 // Task.taskType and SubtaskTemplate.taskType fields are now String
 // to support custom task types per client beyond these 6 defaults.
@@ -111,8 +126,39 @@ model User {
   leaveReviews       LeaveRequest[]      @relation("AdminLeaveReviews")
   delegationsFrom    VisitDelegation[]   @relation("DelegationFrom")
   delegationsTo      VisitDelegation[]   @relation("DelegationTo")
+  teamAssignments    VisitAssignment[]   @relation("VisitTeamAssignments")
+  carryForwardApprovals Subtask[]        @relation("CarryForwardApprovals")
+  adminOperations    AdminOperation[]    @relation("AdminOperationActor")
+  undoneOperations   AdminOperation[]    @relation("AdminOperationUndoer")
 
   @@map("users")
+}
+
+// ─── Super Admin operation log (§1) ──────────────────────────────────────────
+// Records administrative mutations with enough before/after state to be
+// genuinely reversible. `isReversible` is false for operations that cannot be
+// safely restored (e.g. cascade deletes) — those are still logged for the
+// activity view, but Undo refuses them rather than corrupting relations.
+model AdminOperation {
+  id           String    @id @default(cuid())
+  userId       String
+  action       String    // e.g. "CLIENT_UPDATED", "VISIT_ASSIGNMENT_UPDATED"
+  entityType   String    // "Client" | "Visit" | "Subtask" | ...
+  entityId     String
+  summary      String    // human-readable "what changed"
+  reason       String?   // why, when the actor supplied one (Super Admin corrections)
+  beforeJson   Json?     // field values prior to the change
+  afterJson    Json?     // field values after the change
+  isReversible Boolean   @default(false)
+  undoneAt     DateTime?
+  undoneById   String?
+  createdAt    DateTime  @default(now())
+
+  user     User  @relation("AdminOperationActor", fields: [userId], references: [id])
+  undoneBy User? @relation("AdminOperationUndoer", fields: [undoneById], references: [id])
+
+  @@index([createdAt])
+  @@map("admin_operations")
 }
 
 model Attendance {
@@ -206,6 +252,9 @@ model Visit {
   clientId      String
   executiveId   String
   status        VisitStatus @default(PENDING)
+  // SOLO (default, matches every pre-existing visit) or TEAM. When TEAM, the
+  // executives are listed in `assignments`; `executiveId` is the team LEAD.
+  visitType     VisitType   @default(SOLO)
   scheduledDate DateTime
   // End of the visit's working window. Carry-forward is generated ONLY after
   // this date has passed (see processDueCarryForwards). When null, the end
@@ -224,8 +273,33 @@ model Visit {
   activityLogs  ActivityLog[]
   reassignments VisitReassignment[]
   delegations   VisitDelegation[]
+  assignments   VisitAssignment[]
 
   @@map("visits")
+}
+
+// ─── Team membership for a visit ──────────────────────────────────────────────
+// One row per executive working a TEAM visit, including the LEAD (so the team
+// can be read from a single place). SOLO visits carry no rows here — their
+// executive is Visit.executiveId, exactly as before.
+//
+// Access rule used across the executive APIs: an executive may open a visit
+// when visit.executiveId === them OR a row here matches them. Only the LEAD
+// (i.e. visit.executiveId) may close it.
+model VisitAssignment {
+  id          String    @id @default(cuid())
+  visitId     String
+  executiveId String
+  role        VisitRole @default(MEMBER)
+  createdAt   DateTime  @default(now())
+
+  visit     Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  executive User  @relation("VisitTeamAssignments", fields: [executiveId], references: [id])
+
+  // An executive appears at most once per visit — the DB-level guard behind
+  // the "prevent the same executive from being selected twice" rule.
+  @@unique([visitId, executiveId])
+  @@map("visit_assignments")
 }
 
 model Task {
@@ -260,9 +334,21 @@ model Subtask {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  task            Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  sourceSubtask   Subtask?  @relation("CarryForward", fields: [sourceSubtaskId], references: [id])
-  carriedSubtasks Subtask[] @relation("CarryForward")
+  // ─── Admin-controlled carry-forward ───────────────────────────────────────
+  // The application no longer creates carry-forward on its own. An incomplete
+  // subtask on a finished visit becomes a PENDING carry-forward *request*
+  // (carryForwardRequestedAt). Nothing is copied into a future visit until an
+  // admin approves it, at which point carryForwardApprovedAt/By are stamped
+  // and the carried copy is created. Rejecting stamps carryForwardRejectedAt.
+  carryForwardRequestedAt DateTime?
+  carryForwardApprovedAt  DateTime?
+  carryForwardApprovedById String?
+  carryForwardRejectedAt  DateTime?
+
+  task              Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  sourceSubtask     Subtask?  @relation("CarryForward", fields: [sourceSubtaskId], references: [id])
+  carriedSubtasks   Subtask[] @relation("CarryForward")
+  carryForwardApprovedBy User? @relation("CarryForwardApprovals", fields: [carryForwardApprovedById], references: [id])
 
   // A given source subtask can be carried into a given task at most once -
   // DB-level guard against concurrent carry-forward sweeps racing past the

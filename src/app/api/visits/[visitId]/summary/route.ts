@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/db/prisma";
+import { canViewVisit } from "@/lib/utils/visit-access";
 
 // GET /api/visits/[visitId]/summary
 export async function GET(request: NextRequest, { params }: { params: Promise<{ visitId: string }> }) {
@@ -20,12 +21,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         executiveId: true,
         client: { select: { name: true, code: true } },
         executive: { select: { name: true } },
+        assignments: { select: { executiveId: true, role: true } },
       },
     });
 
     if (!visit) return NextResponse.json({ error: "Visit not found" }, { status: 404 });
 
-    if (user.role === "EXECUTIVE" && visit.executiveId !== user.userId) {
+    // The whole team may read the summary of a visit they worked on.
+    if (user.role === "EXECUTIVE" && !canViewVisit(visit, user.userId)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

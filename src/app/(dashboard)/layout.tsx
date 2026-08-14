@@ -83,11 +83,20 @@ export default async function DashboardLayout({ children }: { children: React.Re
       {/* ── Mobile bottom nav ── */}
       {isExecutive ? <BottomNav /> : <AdminBottomNav userRole={user.role} />}
 
-      {/* ── Toast notifications ── */}
+      {/* ── Toast notifications ──────────────────────────────────────────
+          zIndex must beat every overlay in the app. Modal/ConfirmDialog
+          portal into document.body with z-[9999]; react-hot-toast's own
+          container also defaults to 9999 but is rendered here, EARLIER in
+          the DOM, so on an equal z-index the modal painted over it and an
+          error raised from inside a modal (e.g. Duplicate Client) was
+          invisible until the modal was closed. One value above every
+          overlay — modal, dialog, sheet, dropdown (z-[80]), popover,
+          drawer — fixes the stacking for the whole application without
+          touching the alert system itself. */}
       <Toaster
         position="top-right"
         gutter={8}
-        containerStyle={{ top: 64 }}
+        containerStyle={{ top: 64, zIndex: 2147483000 }}
         toastOptions={{
           duration: 3500,
           style: {

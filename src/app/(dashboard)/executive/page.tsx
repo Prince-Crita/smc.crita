@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { formatDate, getProgressColor, cn } from "@/lib/utils/utils";
 import { Modal } from "@/components/ui/Modal";
+import { CarryForwardModal } from "@/components/executive/CarryForwardModal";
 import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
 import { markVisitsSeen } from "@/lib/utils/new-visits";
 
@@ -214,6 +215,7 @@ const DrillDownPanel = memo(function DrillDownPanel({
 export default function ExecutiveDashboard() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("");
   const [showDrillDown, setShowDrillDown] = useState(false);
+  const [showCarryForward, setShowCarryForward] = useState(false);
 
   const fetchVisits = useCallback(async () => {
     const d = await fetchJSON<{ visits?: VisitSummary[] }>("/api/visits");
@@ -294,12 +296,15 @@ export default function ExecutiveDashboard() {
     {
       label: "Carry-Fwd",
       value: carryForwardTotal,
-      hint: "Pending subtasks",
+      hint: "Carried tasks",
       icon: RotateCcw,
       iconBg: "bg-orange-50",
       iconColor: "text-[#ff944d]",
       valueColor: "text-[#ff944d]",
       filter: "" as StatusFilter,
+      // Opens the dedicated carry-forward popup instead of the visit
+      // drill-down, so only genuine carry-forward tasks are listed.
+      isCarryForward: true,
     },
   ], [pendingVisits.length, inProgressVisits.length, closedVisits.length, carryForwardTotal]);
 
@@ -339,7 +344,7 @@ export default function ExecutiveDashboard() {
             <button
               key={card.label}
               type="button"
-              onClick={() => openDrillDown(card.filter)}
+              onClick={() => card.isCarryForward ? setShowCarryForward(true) : openDrillDown(card.filter)}
               className="bg-white border border-[#e2e7f0] rounded-xl p-4 text-left hover:border-[#25488e]/30 hover:shadow-md transition-all group cursor-pointer press-effect card-hover"
             >
               <div className="flex items-start justify-between mb-3">
@@ -457,6 +462,11 @@ export default function ExecutiveDashboard() {
           newVisitIds={newVisitIds}
           onClose={() => setShowDrillDown(false)}
         />
+      )}
+
+      {/* ── Carry Forward popup (genuine carry-forward tasks only) ── */}
+      {showCarryForward && (
+        <CarryForwardModal onClose={() => setShowCarryForward(false)} />
       )}
     </div>
   );

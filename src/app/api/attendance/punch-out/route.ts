@@ -14,10 +14,18 @@ export async function POST(request: NextRequest) {
     const now = new Date();
     const today = toMidnightIST(now);
 
-    // Punch-out does one thing: punch out, immediately. The optional note is a
-    // SEPARATE, later step (PATCH /api/attendance) submitted from the inline
-    // Notes section that appears after this succeeds — never a prompt that
-    // stands between the executive and punching out.
+    // Punch-out now requires a reason. The executive confirms in a modal and
+    // the note travels WITH this request, so a punch-out can never be recorded
+    // without one. Enforced here, not only in the UI.
+    const body = await request.json().catch(() => ({} as { notes?: string }));
+    const notes = typeof body?.notes === "string" ? body.notes.trim() : "";
+    if (!notes) {
+      return NextResponse.json(
+        { error: "A note is required to punch out. Please enter a reason." },
+        { status: 400 }
+      );
+    }
+
     const existing = await prisma.attendance.findUnique({
       where: { executiveId_date: { executiveId: user.userId, date: today } },
     });
@@ -40,9 +48,12 @@ export async function POST(request: NextRequest) {
       (now.getTime() - new Date(existing.punchIn).getTime()) / 60000
     );
 
+    // Punch-out time, working duration and the mandatory note are saved in the
+    // same write, so the admin attendance view (which already reads
+    // Attendance.notes) shows the reason with no second notification system.
     const updated = await prisma.attendance.update({
       where: { id: existing.id },
-      data: { punchOut: now, workingMinutes },
+      data: { punchOut: now, workingMinutes, notes },
     });
 
     return NextResponse.json({ attendance: updated });

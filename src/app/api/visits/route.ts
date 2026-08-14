@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/db/prisma";
 import { getSubtaskTotals, sortVisitsForDisplay } from "@/lib/utils/visit-status";
 import { isCarryForwardVisit } from "@/lib/utils/carry-forward";
+import { executiveVisitScope } from "@/lib/utils/visit-access";
 
 // --- GET /api/visits -------------------------------------------------------------
 // Executive gets their assigned visits.
@@ -16,9 +18,11 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const displayStatusFilter = searchParams.get("status");
 
-    const where: Record<string, unknown> = {};
+    // Executives see the visits they own (solo executive or team lead) AND the
+    // team visits they are a member of.
+    const where: Prisma.VisitWhereInput = {};
     if (user.role === "EXECUTIVE") {
-      where.executiveId = user.userId;
+      Object.assign(where, executiveVisitScope(user.userId));
     }
 
     const visits = await prisma.visit.findMany({
@@ -27,6 +31,8 @@ export async function GET(request: NextRequest) {
         id:            true,
         visitNumber:   true,
         status:        true,
+        visitType:     true,
+        executiveId:   true,
         scheduledDate: true,
         endDate:       true,
         openedAt:      true,
@@ -37,6 +43,9 @@ export async function GET(request: NextRequest) {
         },
         executive: {
           select: { name: true, email: true },
+        },
+        assignments: {
+          select: { executiveId: true, role: true, executive: { select: { name: true } } },
         },
         tasks: {
           select: {
@@ -58,6 +67,11 @@ export async function GET(request: NextRequest) {
       // Rule 1) OR an auto-created "missed weekly visit" (Business Rule 2,
       // flagged via the notes marker) — shared helper, single source of truth.
       const hasCarryForward = carryForwardCount > 0 || isCarryForwardVisit(visit);
+      // Team shape for the UI: the lead is Visit.executiveId, members are the
+      // non-LEAD assignment rows. `canClose` is what the executive's own view
+      // uses to decide whether to offer the Close button — a team member
+      // never gets it (the API enforces the same rule server-side).
+      const isLead = visit.executiveId === user.userId;
       return {
         ...visit,
         progress,
@@ -66,6 +80,12 @@ export async function GET(request: NextRequest) {
         carryForwardCount,
         hasCarryForward,
         displayStatus,
+        isTeamVisit: visit.visitType === "TEAM",
+        teamRole: isLead ? "LEAD" : "MEMBER",
+        canClose: isLead,
+        teamMembers: visit.assignments
+          .filter((a) => a.role !== "LEAD")
+          .map((a) => ({ id: a.executiveId, name: a.executive.name })),
       };
     });
 

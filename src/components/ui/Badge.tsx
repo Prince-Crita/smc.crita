@@ -58,9 +58,12 @@ export function ProgressBadge({
   progress: number;
   displayStatus?: "PENDING" | "IN_PROGRESS" | "CLOSED";
 }) {
+  // The fallback can never infer "Closed" from the percentage: only the
+  // explicit Close Visit action closes a visit, so a visit at 100% that has
+  // not been closed is still In Progress. Inferring Closed here relabelled
+  // fully-completed open visits as Closed wherever a caller had no status.
   const resolved =
-    displayStatus ??
-    (progress === 0 ? "PENDING" : progress === 100 ? "CLOSED" : "IN_PROGRESS");
+    displayStatus ?? (progress === 0 ? "PENDING" : "IN_PROGRESS");
 
   const variant: BadgeVariant =
     resolved === "PENDING" ? "pending" : resolved === "CLOSED" ? "closed" : "inprogress";

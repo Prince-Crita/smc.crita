@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { ArrowRight, AlertCircle } from "lucide-react";
 import toast from "react-hot-toast";
+import { revalidateAll } from "@/lib/hooks/useLiveQuery";
 
 interface Visit {
   id: string;
@@ -43,22 +44,44 @@ export function ReassignVisitModal({ visit, executives, onClose, onSuccess }: Re
   const [visitTime, setVisitTime]         = useState("");
   const [loading, setLoading]             = useState(false);
   const [leaveWarning, setLeaveWarning]   = useState("");
+  // Solo/Team assignment for THIS existing visit. Switching either way edits
+  // the same visit — no duplicate visit, no loss of task/subtask progress.
+  const [visitType, setVisitType]         = useState<"SOLO" | "TEAM">("SOLO");
+  const [memberIds, setMemberIds]         = useState<string[]>([]);
 
-  const availableExecs = executives.filter((e) => e.id !== visit?.executiveId);
+  // For SOLO the current owner is excluded (you reassign to someone else);
+  // for TEAM every executive can be the lead, including the current one.
+  const availableExecs = visitType === "TEAM"
+    ? executives
+    : executives.filter((e) => e.id !== visit?.executiveId);
 
   useEffect(() => {
-    if (visit) {
-      setVisitDate(toDateInputValue(visit.scheduledDate));
-      setVisitTime(toTimeInputValue(visit.scheduledDate));
-      setLeaveWarning("");
-    }
+    if (!visit) return;
+    setVisitDate(toDateInputValue(visit.scheduledDate));
+    setVisitTime(toTimeInputValue(visit.scheduledDate));
+    setLeaveWarning("");
+    // Prefill from the visit's current assignment.
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/admin/visits/${visit.id}/assignment`);
+        if (!res.ok) return;
+        const j = await res.json() as { assignment?: { visitType: "SOLO" | "TEAM"; teamLead: { id: string }; teamMembers: { id: string }[] } };
+        if (cancelled || !j.assignment) return;
+        setVisitType(j.assignment.visitType);
+        setMemberIds(j.assignment.teamMembers.map((m) => m.id));
+        if (j.assignment.visitType === "TEAM") setToExecutiveId(j.assignment.teamLead.id);
+      } catch { /* prefill is best-effort */ }
+    })();
+    return () => { cancelled = true; };
   }, [visit]);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
       if (!visit) return;
-      if (!toExecutiveId) { toast.error("Please select an executive"); return; }
+      if (!toExecutiveId) { toast.error(visitType === "TEAM" ? "Please select a Team Lead" : "Please select an executive"); return; }
+      if (visitType === "TEAM" && memberIds.length === 0) { toast.error("Add at least one team member, or switch to Solo"); return; }
       if (reason.trim().length < 5) { toast.error("Please provide a reason (min 5 characters)"); return; }
       if (!visitDate || !visitTime) { toast.error("Please select a visit date and time"); return; }
 
@@ -66,20 +89,31 @@ export function ReassignVisitModal({ visit, executives, onClose, onSuccess }: Re
       setLeaveWarning("");
       try {
         const scheduledDate = `${visitDate}T${visitTime}:00.000Z`;
-        const res  = await fetch(`/api/admin/visits/${visit.id}/reassign`, {
-          method: "POST",
+        // The assignment endpoint edits THIS visit in place — solo↔team, lead
+        // change, member add/remove and the date, all without creating a
+        // duplicate visit or touching its tasks/subtasks.
+        const res = await fetch(`/api/admin/visits/${visit.id}/assignment`, {
+          method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ toExecutiveId, reason: reason.trim(), scheduledDate }),
+          body: JSON.stringify({
+            visitType,
+            executiveId: toExecutiveId,
+            ...(visitType === "TEAM" ? { memberIds } : {}),
+            reason: reason.trim(),
+            scheduledDate,
+          }),
         });
         const data = await res.json();
         if (!res.ok) {
           if (data.code === "LEAVE_CONFLICT") { setLeaveWarning(data.error || "Leave conflict"); return; }
-          toast.error(data.error || "Reassignment failed");
+          toast.error(data.error || "Assignment update failed");
           return;
         }
 
-        toast.success("Visit reassigned successfully");
+        toast.success(visitType === "TEAM" ? "Team assignment updated" : "Visit reassigned successfully");
         onSuccess();
+        // Admin lists, calendar and the executive's own screens refetch once.
+        revalidateAll();
         onClose();
       } catch {
         toast.error("An error occurred");
@@ -91,7 +125,7 @@ export function ReassignVisitModal({ visit, executives, onClose, onSuccess }: Re
   );
 
   return (
-    <Modal isOpen={!!visit} onClose={onClose} title="Reassign Visit" size="sm">
+    <Modal isOpen={!!visit} onClose={onClose} title="Visit Assignment" size="sm">
       <form onSubmit={handleSubmit}>
         <div className="p-5 space-y-4">
           {visit && (
@@ -119,15 +153,43 @@ export function ReassignVisitModal({ visit, executives, onClose, onSuccess }: Re
                 </div>
               </div>
 
-              {/* Executive select */}
+              {/* Visit Type — Solo or Team for this existing visit */}
               <div>
                 <label className="block text-sm font-semibold text-[#0f1829] mb-1.5">
-                  Assign To <span className="text-red-500">*</span>
+                  Visit Type <span className="text-red-500">*</span>
+                </label>
+                <div className="flex gap-2">
+                  {(["SOLO", "TEAM"] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => { setVisitType(t); setMemberIds([]); setLeaveWarning(""); }}
+                      className={
+                        "flex-1 py-2 rounded-lg text-sm font-semibold border transition-colors " +
+                        (visitType === t
+                          ? "bg-[#25488e] text-white border-[#25488e]"
+                          : "bg-white text-[#4a5568] border-[#e2e7f0] hover:bg-[#f1f4f9]")
+                      }
+                    >
+                      {t === "SOLO" ? "Solo Visit" : "Team Visit"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Executive / Team Lead select */}
+              <div>
+                <label className="block text-sm font-semibold text-[#0f1829] mb-1.5">
+                  {visitType === "TEAM" ? "Team Lead" : "Assign To"} <span className="text-red-500">*</span>
                 </label>
                 <select
                   className={inputClass}
                   value={toExecutiveId}
-                  onChange={(e) => { setToExecutiveId(e.target.value); setLeaveWarning(""); }}
+                  onChange={(e) => {
+                    setToExecutiveId(e.target.value);
+                    setMemberIds((prev) => prev.filter((id) => id !== e.target.value));
+                    setLeaveWarning("");
+                  }}
                 >
                   <option value="">— Select Executive —</option>
                   {availableExecs.map((ex) => (
@@ -135,6 +197,37 @@ export function ReassignVisitModal({ visit, executives, onClose, onSuccess }: Re
                   ))}
                 </select>
               </div>
+
+              {/* Team members — the lead is excluded so nobody can be picked twice */}
+              {visitType === "TEAM" && (
+                <div>
+                  <label className="block text-sm font-semibold text-[#0f1829] mb-1.5">
+                    Team Members <span className="text-red-500">*</span>
+                  </label>
+                  <div className="border border-[#e2e7f0] rounded-lg divide-y divide-[#f1f4f9] max-h-40 overflow-y-auto">
+                    {executives.filter((e) => e.id !== toExecutiveId).map((e) => {
+                      const checked = memberIds.includes(e.id);
+                      return (
+                        <label key={e.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[#f8fafc]">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              setMemberIds((prev) => checked ? prev.filter((id) => id !== e.id) : [...prev, e.id]);
+                              setLeaveWarning("");
+                            }}
+                            className="w-4 h-4 accent-[#25488e]"
+                          />
+                          <span className="text-sm text-[#0f1829]">{e.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-[#8896a9] mt-1.5">
+                    {memberIds.length} selected. Only the Team Lead can close a team visit.
+                  </p>
+                </div>
+              )}
 
               {leaveWarning && (
                 <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
@@ -201,7 +294,7 @@ export function ReassignVisitModal({ visit, executives, onClose, onSuccess }: Re
             disabled={loading}
             className="flex-1 py-2.5 rounded-lg bg-[#25488e] hover:bg-[#1e3a72] disabled:opacity-50 text-white text-sm font-semibold transition-all press-effect shadow-sm"
           >
-            {loading ? "Reassigning…" : "Confirm Reassign"}
+            {loading ? "Saving…" : "Save Assignment"}
           </button>
         </div>
       </form>

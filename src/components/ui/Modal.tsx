@@ -127,7 +127,14 @@ export function Modal({
         onClick={(e) => e.stopPropagation()}
       >
         <ModalHeader title={title} onClose={onClose} />
-        <div className="flex flex-col flex-1 min-h-0 sm:overflow-y-auto sm:overscroll-contain">
+        {/* Scrolls at EVERY size. The overflow rule used to be `sm:`-only, so
+            on a phone this pane had no scroller while its panel was pinned to
+            h-[100dvh] — content past the fold (e.g. the lower carry-forward
+            clients) was simply unreachable. The header stays put because the
+            panel is a flex column and this pane is the only growing child;
+            overscroll-contain keeps the page behind from taking over the
+            gesture at the ends of the list. */}
+        <div className="flex flex-col flex-1 min-h-0 overflow-y-auto overscroll-contain">
           {children}
         </div>
       </div>

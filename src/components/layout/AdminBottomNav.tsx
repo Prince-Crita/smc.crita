@@ -17,6 +17,10 @@ import {
   FileText,
   CalendarDays,
   ShieldCheck,
+  Gauge,
+  Database,
+  HeartPulse,
+  Undo2,
 } from "lucide-react";
 import { cn } from "@/lib/utils/utils";
 import toast from "react-hot-toast";
@@ -57,8 +61,17 @@ export default function AdminBottomNav({ userRole }: { userRole?: "ADMIN" | "EXE
     return () => { document.body.style.overflow = ""; };
   }, [sheetOpen]);
 
+  // The Super Admin control layer reaches mobile through the same menu sheet
+  // the admin screens already use — no separate mobile navigation to maintain.
   const items = userRole === "SUPER_ADMIN"
-    ? [...menuItems, { href: "/admin/admin-management", icon: ShieldCheck, label: "Admin Management" }]
+    ? [
+        ...menuItems,
+        { href: "/admin/system",        icon: Gauge,      label: "System Overview"  },
+        { href: "/admin/records",       icon: Database,   label: "Records"          },
+        { href: "/admin/system-health", icon: HeartPulse, label: "Data Integrity"   },
+        { href: "/admin/control-panel", icon: Undo2,      label: "Control Panel"    },
+        { href: "/admin/admin-management", icon: ShieldCheck, label: "Admin Management" },
+      ]
     : menuItems;
 
   // Routes that belong to the menu sheet — used to detect if the sheet trigger

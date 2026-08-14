@@ -10,8 +10,11 @@ export default function LoginPage() {
   return (
     <>
       <LoginForm />
+      {/* Same stacking rule as the dashboard layout — an alert must never be
+          painted behind a modal/dialog. */}
       <Toaster
         position="top-right"
+        containerStyle={{ zIndex: 2147483000 }}
         toastOptions={{
           style: {
             background: "#ffffff",

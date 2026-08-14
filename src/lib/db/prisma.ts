@@ -22,6 +22,21 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
+/**
+ * True when the connection string points at a database on this machine.
+ * Local PostgreSQL installs generally have SSL compiled out and answer the
+ * TLS handshake with "server does not support SSL connections", so the
+ * Neon-oriented ssl option has to be skipped for them.
+ */
+export function isLocalDatabase(connectionString: string): boolean {
+  try {
+    const { hostname } = new URL(connectionString);
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
+}
+
 function createPrismaClient(): PrismaClient {
   const connectionString = process.env.DATABASE_URL;
 
@@ -37,9 +52,12 @@ function createPrismaClient(): PrismaClient {
   //   Each Vercel function invocation gets its own cold-start; a large pool here
   //   would exhaust Neon's connection limit when many functions run simultaneously.
   // ssl.rejectUnauthorized: false — required for Neon's self-signed certificates.
+  //   A local PostgreSQL server is typically built without SSL support and
+  //   rejects the handshake outright, so SSL is skipped for local hosts only.
+  //   Every remote host (Neon in dev and production) keeps the previous setting.
   const pool = new Pool({
     connectionString,
-    ssl: { rejectUnauthorized: false },
+    ssl: isLocalDatabase(connectionString) ? false : { rejectUnauthorized: false },
     max: 5,
     idleTimeoutMillis: 10_000,
     connectionTimeoutMillis: 5_000,

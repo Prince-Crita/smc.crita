@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { isAdminRole } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/prisma";
-import { CARRY_FORWARD_NOTE_PREFIX, runCarryForwardMaintenance } from "@/lib/utils/carry-forward";
+import { CARRY_FORWARD_NOTE_PREFIX, moveCarryForward, runCarryForwardMaintenance } from "@/lib/utils/carry-forward";
+import { normalizeAssignment } from "@/lib/utils/visit-assignment";
 
 // GET /api/admin/carry-forward — All carry-forward activity
 //
@@ -39,8 +40,12 @@ export async function GET(request: NextRequest) {
                   visitNumber: true,
                   status: true,
                   scheduledDate: true,
-                  client: { select: { name: true, code: true } },
-                  executive: { select: { name: true } },
+                  // §7 — the admin changes the executive/team from this page,
+                  // so the current assignment has to travel with the row.
+                  visitType: true,
+                  client: { select: { id: true, name: true, code: true } },
+                  executive: { select: { id: true, name: true } },
+                  assignments: { select: { role: true, executive: { select: { id: true, name: true } } } },
                 },
               },
             },
@@ -95,8 +100,9 @@ export async function GET(request: NextRequest) {
           status: true,
           scheduledDate: true,
           notes: true,
-          client: { select: { name: true, code: true } },
-          executive: { select: { name: true } },
+          visitType: true,
+          client: { select: { id: true, name: true, code: true } },
+          executive: { select: { id: true, name: true } },
         },
         orderBy: { scheduledDate: "desc" },
       }),
@@ -131,9 +137,18 @@ export async function GET(request: NextRequest) {
     const grouped = Array.from(byVisit.entries()).map(([visitId, subtasks]) => ({
       visitId,
       visitNumber: subtasks[0].task.visit.visitNumber,
+      // clientId is what the Carry Forward page groups on — client NAMES are
+      // not unique (duplicated clients are literally "<name> (Copy)" and can
+      // be renamed to anything), so grouping by name merged unrelated clients.
+      clientId: subtasks[0].task.visit.client.id,
       clientName: subtasks[0].task.visit.client.name,
       clientCode: subtasks[0].task.visit.client.code,
+      executiveId: subtasks[0].task.visit.executive.id,
       executiveName: subtasks[0].task.visit.executive.name,
+      visitType: subtasks[0].task.visit.visitType,
+      teamMembers: subtasks[0].task.visit.assignments
+        .filter((a: any) => a.role !== "LEAD")
+        .map((a: any) => ({ id: a.executive.id, name: a.executive.name })),
       visitStatus: subtasks[0].task.visit.status,
       scheduledDate: subtasks[0].task.visit.scheduledDate,
       reason: null as string | null,
@@ -157,9 +172,13 @@ export async function GET(request: NextRequest) {
       grouped.push({
         visitId: v.id,
         visitNumber: v.visitNumber,
+        clientId: v.client.id,
         clientName: v.client.name,
         clientCode: v.client.code,
+        executiveId: v.executive.id,
         executiveName: v.executive.name,
+        visitType: v.visitType,
+        teamMembers: [] as { id: string; name: string }[],
         visitStatus: v.status,
         scheduledDate: v.scheduledDate,
         reason: "Missed Weekly Visit",
@@ -230,6 +249,62 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Carry forward remove error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+// ─── PATCH /api/admin/carry-forward ──────────────────────────────────────────
+// §7 — change the executive/team and/or the destination date of carry-forward
+// tasks that have ALREADY been carried.
+// Body: { subtaskIds: string[], destinationDate?: string,
+//         assignment?: { visitType, executiveId, memberIds } }
+//
+// At least one of destinationDate / assignment must be supplied. The carried
+// rows are MOVED (never copied), scoped per client, and the original subtask,
+// visit and task configuration are never touched.
+export async function PATCH(request: NextRequest) {
+  const user = await getAuthUser(request);
+  if (!user || !isAdminRole(user.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  try {
+    const body = await request.json().catch(() => ({})) as {
+      subtaskIds?: string[];
+      destinationDate?: string;
+      assignment?: { visitType?: "SOLO" | "TEAM"; executiveId?: string; memberIds?: string[] };
+    };
+
+    const subtaskIds = Array.isArray(body.subtaskIds) ? body.subtaskIds.filter(Boolean) : [];
+    if (subtaskIds.length === 0) {
+      return NextResponse.json({ error: "Select at least one carry-forward task." }, { status: 400 });
+    }
+    if (!body.destinationDate && !body.assignment) {
+      return NextResponse.json({ error: "Choose a new date or a new assignment." }, { status: 400 });
+    }
+
+    let destinationDate: Date | undefined;
+    if (body.destinationDate) {
+      destinationDate = new Date(body.destinationDate);
+      if (isNaN(destinationDate.getTime())) {
+        return NextResponse.json({ error: "Invalid destination date." }, { status: 400 });
+      }
+    }
+
+    let assignment;
+    if (body.assignment) {
+      const normalized = normalizeAssignment(body.assignment);
+      if (normalized.error) return NextResponse.json({ error: normalized.error }, { status: 400 });
+      assignment = normalized.value;
+    }
+
+    const result = await moveCarryForward(subtaskIds, { destinationDate, assignment }, user.userId);
+    if (result.moved === 0 && result.errors.length > 0) {
+      return NextResponse.json({ error: result.errors[0] }, { status: 400 });
+    }
+    return NextResponse.json({ success: true, ...result });
+  } catch (error) {
+    console.error("Carry forward reschedule error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

@@ -8,7 +8,8 @@ import toast from "react-hot-toast";
 import {
   LayoutDashboard, ClipboardList, RotateCcw, LogOut,
   ChevronLeft, Building2, CheckSquare, UserCog, Settings2,
-  CalendarDays, Clock, FileText, ShieldCheck,
+  CalendarDays, Clock, FileText, ShieldCheck, Undo2,
+  Gauge, Database, HeartPulse,
 } from "lucide-react";
 import { cn } from "@/lib/utils/utils";
 import { isAdminRole } from "@/lib/auth/roles";
@@ -37,9 +38,16 @@ const adminNavItems: NavItem[] = [
   { href: "/admin/leaves", icon: FileText, label: "Leave Approvals" },
 ];
 
+// Super Admin keeps every Admin screen and adds the system-control layer.
+// Each of these routes is SUPER_ADMIN-gated server-side AND by its own API;
+// these links only keep them out of a normal admin's navigation.
 const superAdminNavItems: NavItem[] = [
   ...adminNavItems,
   { type: "separator", label: "Super Admin" },
+  { href: "/admin/system", icon: Gauge, label: "System Overview" },
+  { href: "/admin/records", icon: Database, label: "Records" },
+  { href: "/admin/system-health", icon: HeartPulse, label: "Data Integrity" },
+  { href: "/admin/control-panel", icon: Undo2, label: "Control Panel" },
   { href: "/admin/admin-management", icon: ShieldCheck, label: "Admin Management" },
 ];
 

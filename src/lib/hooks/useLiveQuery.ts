@@ -175,6 +175,33 @@ export interface UseLiveQueryResult<T> {
   setData: Dispatch<SetStateAction<T | null>>;
 }
 
+// ── Cross-component revalidation broadcast ───────────────────────────────
+// A mutation on one screen usually invalidates data another mounted screen is
+// already showing: changing a visit's assignment changes the admin client
+// page, the admin visit list, the calendar and the executive's own list, and
+// rescheduling a carry-forward changes the popup, the dashboard and the
+// visit pages. Each of those is a separate useLiveQuery, and refresh() only
+// refetches the one it belongs to, so everything else stayed stale until the
+// user re-focused the window or navigated.
+//
+// This is a one-shot push, NOT polling: nothing fires unless a mutation calls
+// revalidateAll(). Every mounted live query refetches exactly once, through
+// the same throttled `run` it already uses, so a burst of mutations cannot
+// become a request storm.
+//
+// Cross-USER updates (admin in one browser, executive in another) still ride
+// the existing focus/visibility revalidation — a browser cannot be pushed to
+// without a server channel, and polling is deliberately not used here.
+type Revalidator = () => void;
+const revalidators = new Set<Revalidator>();
+
+/** Refetch every mounted useLiveQuery once. Call after a mutation. */
+export function revalidateAll(): void {
+  for (const r of revalidators) {
+    try { r(); } catch { /* one bad subscriber must not stop the rest */ }
+  }
+}
+
 export function useLiveQuery<T>(
   fetcher: () => Promise<T>,
   options: UseLiveQueryOptions = {}
@@ -280,6 +307,15 @@ export function useLiveQuery<T>(
     const id = setInterval(run, intervalMs);
     return () => clearInterval(id);
   }, [enabled, intervalMs, run]);
+
+  // Subscribe to the mutation broadcast. Forced, because a mutation the user
+  // just performed must never be swallowed by the focus/visibility throttle.
+  useEffect(() => {
+    if (!enabled) return;
+    const fn = () => { void run({ force: true }); };
+    revalidators.add(fn);
+    return () => { revalidators.delete(fn); };
+  }, [enabled, run]);
 
   // refresh()/mutate() are the explicit "I just performed a mutation, get me
   // fresh data now" API used throughout the app's create/update/delete

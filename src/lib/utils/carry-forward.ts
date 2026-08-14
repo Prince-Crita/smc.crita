@@ -6,6 +6,7 @@ import {
   isSubtaskOnlyCarryForwardVisit,
 } from "@/lib/utils/create-visit";
 import { toMidnightIST } from "@/lib/utils/attendance";
+import { applyAssignment, NormalizedAssignment } from "@/lib/utils/visit-assignment";
 
 interface TaskWithSubtasks extends Task {
   subtasks: Subtask[];
@@ -46,14 +47,26 @@ export function isCarryForwardVisit(visit: { notes: string | null }): boolean {
 }
 
 // ─── Visit end-date semantics ───────────────────────────────────────────────
-// Every visit has a working window [scheduledDate .. endDate]. Carry-forward
-// is generated ONLY after the end date has passed (Business Rule: Case 1 -
-// end date not passed → no carry-forward; Case 2 - end date passed AND
-// incomplete tasks → auto carry-forward). When no explicit endDate is set,
-// the window ends at the end of the scheduledDate's IST calendar day.
+// Every visit has a working window [scheduledDate .. endDate], and the END
+// DATE IS A FULL WORKING DAY — the executive owns it until 23:59:59 IST.
+// Carry-forward only becomes eligible AFTER that day is over.
+//
+// Both scheduledDate and endDate are stored as UTC midnight of the intended
+// calendar day (that is what `new Date("2026-08-11")` produces from the date
+// pickers). Treating the raw endDate as the boundary therefore ended the
+// window at 00:00 UTC = 05:30 IST ON the end date itself, so a visit dated
+// 11 Aug → 11 Aug was declared "over" at half past five in the morning of the
+// 11th and its unfinished subtasks were flagged for carry-forward while the
+// executive still had the whole day to do them.
+//
+// The boundary is therefore always the END of the IST calendar day that the
+// end date falls on (midnight IST of the following day):
+//   11 Aug → 11 Aug   ⇒ eligible from 12 Aug 00:00 IST
+//   11 Aug → 13 Aug   ⇒ eligible from 14 Aug 00:00 IST
+//   no end date       ⇒ end of the scheduledDate's own IST day
 export function getEffectiveEndDate(visit: { scheduledDate: Date; endDate?: Date | null }): Date {
-  if (visit.endDate) return visit.endDate;
-  const dayStart = toMidnightIST(visit.scheduledDate);
+  const lastWorkingDay = visit.endDate ?? visit.scheduledDate;
+  const dayStart = toMidnightIST(lastWorkingDay);
   return new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
 }
 
@@ -378,6 +391,16 @@ function getMondayUTC(d: Date): Date {
  * week per client.
  */
 export async function checkAndCreateMissedWeeklyVisits(): Promise<{ checked: number; created: number }> {
+  // ─── DISABLED (§7): the application must not create carry-forward visits ───
+  // This rule used to auto-create a "Missed Weekly Visit" for any client whose
+  // week elapsed with no visit. Carry-forward is now entirely admin-approved,
+  // so nothing may be created automatically. Kept as a no-op so the existing
+  // callers and their error handling stay untouched.
+  return { checked: 0, created: 0 };
+}
+
+/** Retained for reference/testing; no longer invoked by the running app. */
+export async function legacyCheckAndCreateMissedWeeklyVisits(): Promise<{ checked: number; created: number }> {
   const now = Date.now();
   if (now - lastMissedWeeklyCheckAt < MISSED_WEEKLY_CHECK_THROTTLE_MS) {
     return { checked: 0, created: 0 };
@@ -546,9 +569,28 @@ let lastDueCarryForwardCheckAt = 0;
 const DUE_CARRY_FORWARD_THROTTLE_MS = 5 * 60 * 1000; // 5 minutes
 
 export async function processDueCarryForwards(): Promise<{ processed: number; carried: number }> {
+  // ─── Automatic carry-forward is DISABLED (§7) ──────────────────────────────
+  // The application must never create or approve carry-forward on its own.
+  // Instead, `markDueCarryForwardRequests()` flags eligible incomplete
+  // subtasks as PENDING requests, and an admin approves them from the
+  // Admin → Carry Forward page, which is what actually creates the carried
+  // copies (see approveCarryForward()).
+  //
+  // The function is kept — rather than deleted — so every existing caller
+  // keeps working; it now only marks requests and never writes carried rows.
+  const marked = await markDueCarryForwardRequests();
+  return { processed: marked.marked, carried: 0 };
+}
+
+/**
+ * Flag incomplete subtasks on finished visits as PENDING carry-forward
+ * requests. Marking is idempotent and creates NOTHING — no visits, no carried
+ * subtasks — it only records that an item is awaiting an admin decision.
+ */
+export async function markDueCarryForwardRequests(): Promise<{ marked: number }> {
   const now = Date.now();
   if (now - lastDueCarryForwardCheckAt < DUE_CARRY_FORWARD_THROTTLE_MS) {
-    return { processed: 0, carried: 0 };
+    return { marked: 0 };
   }
   lastDueCarryForwardCheckAt = now;
 
@@ -574,19 +616,402 @@ export async function processDueCarryForwards(): Promise<{ processed: number; ca
     take: 50, // safety cap per sweep - the throttle re-runs regularly
   });
 
-  let processed = 0;
-  let carried = 0;
-
+  // Collect the incomplete subtasks whose visit window is genuinely over and
+  // that are not already requested/approved/rejected, then flag them in one
+  // write. No visit and no carried subtask is created here.
+  const toMark: string[] = [];
   for (const visit of candidates) {
     if (!hasEndDatePassed(visit, nowDate)) continue;
-    // executeCarryForward internally skips subtasks that were already
-    // carried; if everything was carried before, it's a cheap no-op.
-    const result = await executeCarryForward(visit, visit.executiveId);
-    processed++;
-    carried += result.carriedCount;
+    for (const task of visit.tasks) {
+      for (const subtask of task.subtasks) {
+        if (subtask.isCompleted) continue;
+        // Already carried elsewhere, or already decided — leave alone.
+        if (subtask.isCarriedForward) continue;
+        if (subtask.carryForwardRequestedAt || subtask.carryForwardApprovedAt || subtask.carryForwardRejectedAt) continue;
+        toMark.push(subtask.id);
+      }
+    }
   }
 
-  return { processed, carried };
+  if (toMark.length > 0) {
+    await prisma.subtask.updateMany({
+      where: { id: { in: toMark } },
+      data: { carryForwardRequestedAt: nowDate },
+    });
+  }
+
+  return { marked: toMark.length };
+}
+
+// ─── Admin-approved carry-forward (§7 + §8) ──────────────────────────────────
+
+export interface ApproveCarryForwardResult {
+  approved: number;
+  skipped: number;
+  /** Visits that received carried subtasks, and whether each already existed. */
+  destinations: { visitId: string; visitNumber: string; created: boolean }[];
+  errors: string[];
+}
+
+export interface ApproveCarryForwardOptions {
+  /**
+   * §5 — the admin may re-assign the work while approving it. When present,
+   * the destination visit is put on this SOLO/TEAM assignment through the
+   * app's single assignment path (applyAssignment), so the approved carry-
+   * forward is owned by exactly the executive/team the admin picked.
+   * Omitted → the destination keeps whatever assignment it already had, and a
+   * newly created destination inherits the previous executive.
+   */
+  assignment?: NormalizedAssignment;
+}
+
+/**
+ * Approve carry-forward for specific subtasks and place them on the chosen
+ * destination date.
+ *
+ * §8: if the client ALREADY has a visit on the destination date, the carried
+ * subtasks are added into that existing visit — a second visit is never
+ * created. A visit is only created when the client has none on that date.
+ *
+ * Duplicate protection is threefold: the subtask must still be a pending
+ * request, the destination task must not already hold a pending carried copy
+ * with the same title, and @@unique([taskId, sourceSubtaskId]) is the final
+ * database-level guard.
+ */
+export async function approveCarryForward(
+  subtaskIds: string[],
+  destinationDate: Date,
+  approvedByUserId: string,
+  options: ApproveCarryForwardOptions = {}
+): Promise<ApproveCarryForwardResult> {
+  const result: ApproveCarryForwardResult = { approved: 0, skipped: 0, destinations: [], errors: [] };
+  if (subtaskIds.length === 0) return result;
+
+  const subtasks = await prisma.subtask.findMany({
+    where: { id: { in: subtaskIds } },
+    include: {
+      task: {
+        include: {
+          visit: { select: { id: true, clientId: true, executiveId: true, visitNumber: true } },
+        },
+      },
+    },
+  });
+
+  const dayStart = toMidnightIST(destinationDate);
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+
+  // Group by client so each client's destination visit is resolved once.
+  const byClient = new Map<string, typeof subtasks>();
+  for (const s of subtasks) {
+    if (s.isCompleted) { result.skipped++; continue; }
+    if (s.carryForwardApprovedAt) { result.skipped++; continue; }
+    const key = s.task.visit.clientId;
+    if (!byClient.has(key)) byClient.set(key, []);
+    byClient.get(key)!.push(s);
+  }
+
+  for (const [clientId, items] of byClient.entries()) {
+    try {
+      // §8 — reuse the client's existing visit on the destination date.
+      let destination = await prisma.visit.findFirst({
+        where: {
+          clientId,
+          scheduledDate: { gte: dayStart, lt: dayEnd },
+          status: { in: ["PENDING", "OPEN"] },
+        },
+        orderBy: { scheduledDate: "asc" },
+        include: { tasks: { include: { subtasks: true } } },
+      });
+      let createdVisit = false;
+
+      if (!destination) {
+        const { visitId } = await createVisitForClient(
+          clientId,
+          // §5 — a re-assignment chosen at approval time owns the new visit
+          // from the moment it exists; otherwise the previous executive keeps
+          // the work, which is the historical behaviour.
+          options.assignment?.leadId ?? items[0].task.visit.executiveId,
+          approvedByUserId,
+          {
+            scheduledDate: destinationDate,
+            notes: `${CARRY_FORWARD_NOTE_PREFIX} Approved by admin] ${CARRY_FORWARD_SUBTASKS_ONLY_MARKER}`,
+            skipActiveDuplicateGuard: true,
+            skipTaskScaffolding: true,
+          }
+        );
+        destination = await prisma.visit.findUnique({
+          where: { id: visitId },
+          include: { tasks: { include: { subtasks: true } } },
+        });
+        createdVisit = true;
+      }
+      if (!destination) { result.errors.push("Could not resolve a destination visit"); continue; }
+
+      // §5 — apply the admin's Solo/Team choice to the destination visit. This
+      // goes through the same applyAssignment used by every other assignment
+      // surface, so the visit row, its team rows and the lead-only close rule
+      // stay consistent; the visit itself is never recreated, so an existing
+      // destination keeps its id, its normal tasks and their completion.
+      if (options.assignment) {
+        await applyAssignment(prisma, destination.id, options.assignment);
+      }
+
+      for (const item of items) {
+        // Find (or create) the matching main task on the destination visit so
+        // the carried subtask lands under the same main task it came from.
+        let target = destination.tasks.find((t) => t.taskType === item.task.taskType);
+        if (!target) {
+          const maxOrder = destination.tasks.reduce((m, t) => Math.max(m, t.orderIndex), -1);
+          const created = await prisma.task.create({
+            data: {
+              visitId: destination.id,
+              taskType: item.task.taskType,
+              title: item.task.title,
+              status: "PENDING",
+              orderIndex: maxOrder + 1,
+            },
+          });
+          target = { ...created, subtasks: [] };
+          destination.tasks.push(target);
+        }
+
+        const cleanTitle = item.title.replace("[CARRY-FORWARD] ", "");
+        const duplicate = target.subtasks.some(
+          (s) => s.isCarriedForward && !s.isCompleted && s.title.replace("[CARRY-FORWARD] ", "") === cleanTitle
+        );
+        if (duplicate) { result.skipped++; continue; }
+
+        try {
+          const carried = await prisma.subtask.create({
+            data: {
+              taskId: target.id,
+              title: `[CARRY-FORWARD] ${cleanTitle}`,
+              isCompleted: false,
+              isCarriedForward: true,
+              sourceSubtaskId: item.id,
+            },
+          });
+          target.subtasks.push(carried);
+          await prisma.subtask.update({
+            where: { id: item.id },
+            data: {
+              carryForwardApprovedAt: new Date(),
+              carryForwardApprovedById: approvedByUserId,
+              carryForwardRejectedAt: null,
+            },
+          });
+          result.approved++;
+        } catch (err) {
+          // P2002 = the unique guard fired; the item was already carried.
+          if ((err as { code?: string })?.code === "P2002") { result.skipped++; continue; }
+          throw err;
+        }
+      }
+
+      result.destinations.push({
+        visitId: destination.id,
+        visitNumber: destination.visitNumber,
+        created: createdVisit,
+      });
+
+      await prisma.activityLog.create({
+        data: {
+          visitId: destination.id,
+          userId: approvedByUserId,
+          action: "CARRY_FORWARD_APPLIED",
+          metadata: {
+            reason: "ADMIN_APPROVED",
+            destinationDate: destinationDate.toISOString(),
+            reusedExistingVisit: !createdVisit,
+            itemCount: items.length,
+          },
+        },
+      });
+    } catch (err) {
+      result.errors.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  return result;
+}
+
+// ─── Admin: change executive / team / date of ALREADY-CARRIED work (§7) ──────
+
+export interface MoveCarryForwardResult {
+  moved: number;
+  skipped: number;
+  destinations: { visitId: string; visitNumber: string; created: boolean }[];
+  errors: string[];
+}
+
+/**
+ * Re-target carry-forward tasks that have ALREADY been carried: change the
+ * destination date, the assigned executive/team, or both.
+ *
+ * The rules that make this safe:
+ *   • Per client. A client's carried task can only ever land on that same
+ *     client's visit.
+ *   • The carried ROW is moved, never copied — no duplicate is produced and
+ *     `sourceSubtaskId` (its link back to the original) is untouched, so the
+ *     carry-forward history stays traceable.
+ *   • The ORIGINAL subtask, its visit, the main task and the client's task
+ *     configuration are never written to.
+ *   • Re-assignment never rewrites a visit that also holds normal work: if a
+ *     new assignment is requested, the destination is a carry-forward-only
+ *     visit (an existing one for that client/date, or a new one), so the
+ *     client's ordinary tasks are never silently reassigned with it. Without
+ *     an assignment change the task joins the client's existing visit for the
+ *     date exactly as §3 requires.
+ *   • A carry-forward-only holder visit left completely empty by the move is
+ *     removed, so the work stops appearing under the previous executive.
+ */
+export async function moveCarryForward(
+  subtaskIds: string[],
+  options: { destinationDate?: Date; assignment?: NormalizedAssignment },
+  actingUserId: string
+): Promise<MoveCarryForwardResult> {
+  const result: MoveCarryForwardResult = { moved: 0, skipped: 0, destinations: [], errors: [] };
+  if (subtaskIds.length === 0) return result;
+
+  const rows = await prisma.subtask.findMany({
+    where: { id: { in: subtaskIds }, isCarriedForward: true },
+    include: {
+      task: {
+        include: {
+          visit: { select: { id: true, clientId: true, executiveId: true, visitNumber: true, scheduledDate: true, status: true, notes: true } },
+        },
+      },
+    },
+  });
+
+  const byClient = new Map<string, typeof rows>();
+  for (const s of rows) {
+    if (s.isCompleted) { result.skipped++; continue; }
+    if (s.task.visit.status === "CLOSED") { result.skipped++; continue; }
+    const key = s.task.visit.clientId;
+    if (!byClient.has(key)) byClient.set(key, []);
+    byClient.get(key)!.push(s);
+  }
+
+  for (const [clientId, items] of byClient.entries()) {
+    try {
+      const sourceVisitIds = [...new Set(items.map((i) => i.task.visit.id))];
+      const targetDate = options.destinationDate ?? items[0].task.visit.scheduledDate;
+      const dayStart = toMidnightIST(targetDate);
+      const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+
+      const sameDay = await prisma.visit.findMany({
+        where: { clientId, scheduledDate: { gte: dayStart, lt: dayEnd }, status: { in: ["PENDING", "OPEN"] } },
+        include: { tasks: { include: { subtasks: true } } },
+        orderBy: { scheduledDate: "asc" },
+      });
+
+      // With a new assignment we may only take over a carry-forward-only
+      // visit; otherwise we would reassign the client's normal tasks too.
+      let destination = options.assignment
+        ? sameDay.find((v) => isSubtaskOnlyCarryForwardVisit(v)) ?? null
+        : sameDay.find((v) => !isSubtaskOnlyCarryForwardVisit(v)) ?? sameDay[0] ?? null;
+      let createdVisit = false;
+
+      if (!destination) {
+        const { visitId } = await createVisitForClient(
+          clientId,
+          options.assignment?.leadId ?? items[0].task.visit.executiveId,
+          actingUserId,
+          {
+            scheduledDate: targetDate,
+            endDate: targetDate,
+            notes: `${CARRY_FORWARD_NOTE_PREFIX} Rescheduled by admin] ${CARRY_FORWARD_SUBTASKS_ONLY_MARKER}`,
+            skipActiveDuplicateGuard: true,
+            skipTaskScaffolding: true,
+          }
+        );
+        destination = await prisma.visit.findUnique({
+          where: { id: visitId },
+          include: { tasks: { include: { subtasks: true } } },
+        });
+        createdVisit = true;
+      }
+      if (!destination) { result.errors.push("Could not resolve a destination visit"); continue; }
+
+      if (options.assignment) {
+        await applyAssignment(prisma, destination.id, options.assignment);
+      }
+
+      for (const item of items) {
+        // Already sitting where it should be — only the assignment/date of the
+        // holding visit changed, which is handled above.
+        if (item.task.visitId === destination.id) { result.moved++; continue; }
+
+        let target = destination.tasks.find((t) => t.taskType === item.task.taskType);
+        if (!target) {
+          const maxOrder = destination.tasks.reduce((m, t) => Math.max(m, t.orderIndex), -1);
+          const created = await prisma.task.create({
+            data: {
+              visitId: destination.id,
+              taskType: item.task.taskType,
+              title: item.task.title,
+              status: "PENDING",
+              orderIndex: maxOrder + 1,
+            },
+          });
+          target = { ...created, subtasks: [] };
+          destination.tasks.push(target);
+        }
+        // MOVE the existing row: no new subtask is created, so the task is
+        // never duplicated and its source link survives.
+        await prisma.subtask.update({ where: { id: item.id }, data: { taskId: target.id } });
+        result.moved++;
+      }
+
+      result.destinations.push({ visitId: destination.id, visitNumber: destination.visitNumber, created: createdVisit });
+
+      // Drop carry-forward-only holders that the move emptied, so the previous
+      // executive is not left with a phantom visit.
+      for (const vid of sourceVisitIds) {
+        if (vid === destination.id) continue;
+        const source = await prisma.visit.findUnique({
+          where: { id: vid },
+          include: { tasks: { include: { subtasks: true } } },
+        });
+        if (!source || !isSubtaskOnlyCarryForwardVisit(source)) continue;
+        if (source.tasks.some((t) => t.subtasks.length > 0)) continue;
+        await prisma.activityLog.deleteMany({ where: { visitId: vid } });
+        await prisma.visitReassignment.deleteMany({ where: { visitId: vid } });
+        await prisma.visitDelegation.deleteMany({ where: { visitId: vid } });
+        await prisma.visit.delete({ where: { id: vid } });
+      }
+
+      await prisma.activityLog.create({
+        data: {
+          visitId: destination.id,
+          userId: actingUserId,
+          action: "CARRY_FORWARD_APPLIED",
+          metadata: {
+            reason: "ADMIN_RESCHEDULED",
+            destinationDate: targetDate.toISOString(),
+            reassigned: !!options.assignment,
+            itemCount: items.length,
+          },
+        },
+      });
+    } catch (err) {
+      result.errors.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  return result;
+}
+
+/** Reject carry-forward requests so they stop appearing as pending. */
+export async function rejectCarryForward(subtaskIds: string[]): Promise<{ rejected: number }> {
+  if (subtaskIds.length === 0) return { rejected: 0 };
+  const res = await prisma.subtask.updateMany({
+    where: { id: { in: subtaskIds }, carryForwardApprovedAt: null },
+    data: { carryForwardRejectedAt: new Date() },
+  });
+  return { rejected: res.count };
 }
 
 /**

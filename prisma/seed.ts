@@ -12,8 +12,12 @@ if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL is not set. Make sure .env.local exists.");
 }
 
-// Use standard pg driver for seeding (runs in Node.js, not edge runtime)
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+// Use standard pg driver for seeding (runs in Node.js, not edge runtime).
+// SSL is skipped for a local PostgreSQL server (which rejects the TLS
+// handshake); remote hosts such as Neon keep the previous setting.
+const seedUrl = process.env.DATABASE_URL;
+const isLocalDb = /^(postgres(ql)?:\/\/)[^@]*@(localhost|127\.0\.0\.1|\[::1\]):/i.test(seedUrl ?? "");
+const pool = new pg.Pool({ connectionString: seedUrl, ssl: isLocalDb ? false : { rejectUnauthorized: false } });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const adapter = new PrismaPg(pool as any);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

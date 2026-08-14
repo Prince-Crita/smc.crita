@@ -83,10 +83,18 @@ function CreateVisitModal({ prefillDate, clients, executives, onClose, onCreated
   const [notes, setNotes]             = useState("");
   const [submitting, setSubmitting]   = useState(false);
   const [leaveWarning, setLeaveWarning] = useState("");
+  // Solo (default, unchanged behaviour) or Team. `executiveId` doubles as the
+  // Team Lead when visitType is TEAM.
+  const [visitType, setVisitType]     = useState<"SOLO" | "TEAM">("SOLO");
+  const [memberIds, setMemberIds]     = useState<string[]>([]);
 
   const handleSubmit = async () => {
     if (!clientId || !executiveId || !scheduledDate) {
       toast.error("Please fill all required fields");
+      return;
+    }
+    if (visitType === "TEAM" && memberIds.length === 0) {
+      toast.error("Add at least one team member, or switch to a Solo Visit");
       return;
     }
     if (endDate && endDate < scheduledDate) {
@@ -98,7 +106,10 @@ function CreateVisitModal({ prefillDate, clients, executives, onClose, onCreated
       const res = await fetch("/api/admin/visits", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, executiveId, scheduledDate, ...(endDate ? { endDate } : {}), notes }),
+        body: JSON.stringify({
+          clientId, executiveId, scheduledDate, ...(endDate ? { endDate } : {}), notes,
+          visitType, ...(visitType === "TEAM" ? { memberIds } : {}),
+        }),
       });
       const json = await res.json() as { error?: string; code?: string };
       if (!res.ok) {
@@ -144,14 +155,70 @@ function CreateVisitModal({ prefillDate, clients, executives, onClose, onCreated
             {clients.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
           </select>
         </div>
+        {/* Visit Type — chosen first; it decides whether one executive or a
+            team is assigned below. */}
         <div>
-          <label className="text-xs font-semibold text-[#4a5568] mb-1 block">Assign Executive <span className="text-red-500">*</span></label>
-          <select value={executiveId} onChange={(e) => { setExecutiveId(e.target.value); setLeaveWarning(""); }}
+          <label className="text-xs font-semibold text-[#4a5568] mb-1 block">Visit Type <span className="text-red-500">*</span></label>
+          <div className="flex gap-2">
+            {(["SOLO", "TEAM"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => { setVisitType(t); setMemberIds([]); setLeaveWarning(""); }}
+                className={cn(
+                  "flex-1 py-2 rounded-lg text-sm font-semibold border transition-colors",
+                  visitType === t
+                    ? "bg-[#25488e] text-white border-[#25488e]"
+                    : "bg-white text-[#4a5568] border-[#e2e7f0] hover:bg-[#f1f4f9]"
+                )}
+              >
+                {t === "SOLO" ? "Solo Visit" : "Team Visit"}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <label className="text-xs font-semibold text-[#4a5568] mb-1 block">
+            {visitType === "TEAM" ? "Select Team Lead" : "Select Executive"} <span className="text-red-500">*</span>
+          </label>
+          <select value={executiveId} onChange={(e) => { setExecutiveId(e.target.value); setMemberIds((prev) => prev.filter((id) => id !== e.target.value)); setLeaveWarning(""); }}
             className="w-full border border-[#e2e7f0] rounded-lg px-3 py-2 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30">
             <option value="">Select an executive…</option>
             {executives.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
         </div>
+        {visitType === "TEAM" && (
+          <div>
+            <label className="text-xs font-semibold text-[#4a5568] mb-1 block">Add Team Members <span className="text-red-500">*</span></label>
+            {/* The Team Lead is filtered out, so the same executive can never
+                be selected twice (the API enforces this too). */}
+            <div className="border border-[#e2e7f0] rounded-lg divide-y divide-[#f1f4f9] max-h-44 overflow-y-auto">
+              {executives.filter((e) => e.id !== executiveId).map((e) => {
+                const checked = memberIds.includes(e.id);
+                return (
+                  <label key={e.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[#f8fafc]">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => {
+                        setMemberIds((prev) => checked ? prev.filter((id) => id !== e.id) : [...prev, e.id]);
+                        setLeaveWarning("");
+                      }}
+                      className="w-4 h-4 accent-[#25488e]"
+                    />
+                    <span className="text-sm text-[#0f1829]">{e.name}</span>
+                  </label>
+                );
+              })}
+              {executives.filter((e) => e.id !== executiveId).length === 0 && (
+                <p className="px-3 py-2 text-xs text-[#8896a9]">No other executives available.</p>
+              )}
+            </div>
+            <p className="text-[11px] text-[#8896a9] mt-1">
+              {memberIds.length} member{memberIds.length === 1 ? "" : "s"} selected. Only the Team Lead can close a team visit.
+            </p>
+          </div>
+        )}
         <div>
           <label className="text-xs font-semibold text-[#4a5568] mb-1 block">Notes</label>
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)}

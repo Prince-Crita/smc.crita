@@ -1,18 +1,20 @@
 /**
  * Centralized visit display-status calculation.
  *
- * The database `visit.status` field (PENDING / OPEN / CLOSED) is the source of
- * truth for whether a visit has been formally closed by the executive/admin.
- * `displayStatus` mirrors that truth everywhere in the UI:
+ * The database `visit.status` field (PENDING / OPEN / CLOSED) is the ONLY
+ * source of truth for whether a visit has been formally closed by the
+ * executive. `displayStatus` mirrors that truth everywhere in the UI:
  *   - visit.status === "CLOSED"                    -> "CLOSED"   (always - even if
  *     some subtasks were incomplete and carried forward, e.g. 83% complete)
  *   - visit.status !== "CLOSED" and 0 completed     -> "PENDING"
  *   - visit.status !== "CLOSED" and 1+ completed    -> "IN_PROGRESS"
+ *     (including 100% completed — see calculateDisplayStatus)
  *
- * The subtask completion percentage is reported separately via `progress` /
- * `calculateProgress` and is never used to override an explicit Closed status.
- * A visit closed at 83% must show "Closed" everywhere while still showing
- * "83% Complete" - those are two independent pieces of information.
+ * Progress and status are INDEPENDENT in both directions:
+ *   • a visit closed at 83% shows "Closed · 83%"
+ *   • a visit at 100% that nobody has closed shows "In Progress · 100%"
+ * The percentage never decides the status, and the status never rewrites the
+ * percentage.
  *
  * Use `calculateDisplayStatus` / `getSubtaskTotals` everywhere in the UI and
  * API response payloads instead of re-deriving status ad hoc.
@@ -32,10 +34,17 @@ export function calculateDisplayStatus(
   totalSubtasks: number,
   dbStatus?: string
 ): DisplayStatus {
+  // CLOSED is reached ONLY by the explicit Close Visit action, which is what
+  // sets visit.status = "CLOSED". Finishing every subtask is not closing:
+  // this function used to return "CLOSED" as soon as progress hit 100%, so a
+  // visit the executive had not closed yet jumped into Completed/Closed on
+  // every list, stat tile and calendar cell the moment the last checkbox was
+  // ticked — while the visit was still genuinely OPEN in the database and
+  // still needed its Close Visit step (MD Meeting answer, incompletion
+  // reasons, summary e-mail, carry-forward). A fully-completed but unclosed
+  // visit is IN_PROGRESS until the executive closes it.
   if (dbStatus === "CLOSED") return "CLOSED";
   if (totalSubtasks === 0 || completedSubtasks === 0) return "PENDING";
-  const progress = (completedSubtasks / totalSubtasks) * 100;
-  if (progress >= 100) return "CLOSED";
   return "IN_PROGRESS";
 }
 

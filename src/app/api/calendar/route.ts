@@ -3,6 +3,7 @@ import { getAuthUser } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/db/prisma";
 import { getSubtaskTotals } from "@/lib/utils/visit-status";
 import { runCarryForwardMaintenance, isCarryForwardVisit } from "@/lib/utils/carry-forward";
+import { executiveVisitScope } from "@/lib/utils/visit-access";
 
 // --- GET /api/calendar --------------------------------------------------------
 // Query params:
@@ -42,10 +43,13 @@ export async function GET(request: NextRequest) {
         ? user.userId
         : execIdParam || undefined; // admin: filter if provided, else all
 
+    // An executive's own calendar includes the team visits they are a member
+    // of, not just the ones they own. An admin filtering BY an executive uses
+    // the same rule, so the admin sees what that executive sees.
     const visits = await prisma.visit.findMany({
       where: {
         scheduledDate: { gte: monday, lte: sunday },
-        ...(executiveFilter ? { executiveId: executiveFilter } : {}),
+        ...(executiveFilter ? executiveVisitScope(executiveFilter) : {}),
       },
       select: {
         id: true,

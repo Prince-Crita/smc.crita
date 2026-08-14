@@ -6,6 +6,7 @@ import {
   ChevronRight, X, RotateCcw, Users, Bell, ArrowRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils/utils";
+import { Modal } from "@/components/ui/Modal";
 import toast from "react-hot-toast";
 import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
 
@@ -446,11 +447,12 @@ function VisitConflictPanel({
 export default function LeavePage() {
   const [actionLoading, setActionLoading] = useState(false);
 
-  // Optional punch-out note. Punch Out itself is immediate and unchanged; this
-  // is a SEPARATE step submitted afterwards from the inline Notes section, so
-  // nothing ever stands between the executive and punching out.
+  // Punch-out now goes through a confirmation modal with a MANDATORY note:
+  // the reason is submitted together with the punch-out, so the punch-out is
+  // not recorded until a reason has been entered.
   const [punchOutNotes, setPunchOutNotes] = useState("");
-  const [sendingNotes, setSendingNotes] = useState(false);
+  const [showPunchOutConfirm, setShowPunchOutConfirm] = useState(false);
+  const [punchOutError, setPunchOutError] = useState("");
 
   // Leave form state
   const [selectedDate, setSelectedDate] = useState("");
@@ -534,35 +536,33 @@ export default function LeavePage() {
       await fetchAll();
     } finally { setActionLoading(false); }
   };
-  const handlePunchOut = async () => {
-    setActionLoading(true);
-    try {
-      const res = await fetch("/api/attendance/punch-out", { method: "POST" });
-      if (!res.ok) { const j = await res.json() as { error: string }; toast.error(j.error); return; }
-      toast.success("Punched out successfully!");
-      await fetchAll();
-    } finally { setActionLoading(false); }
+  // Punch Out opens the confirmation modal — it never punches out directly.
+  const handlePunchOut = () => {
+    setPunchOutNotes("");
+    setPunchOutError("");
+    setShowPunchOutConfirm(true);
   };
 
-  // Sends today's optional note. Separate call, after punch-out has completed.
-  const handleSendNotes = async () => {
+  // Confirms the punch-out, sending the mandatory note in the same request.
+  const handleConfirmPunchOut = async () => {
     const text = punchOutNotes.trim();
-    if (!text) { toast.error("Please type a note first"); return; }
-    setSendingNotes(true);
+    if (!text) { setPunchOutError("Please enter a reason before punching out."); return; }
+    setActionLoading(true);
     try {
-      const res = await fetch("/api/attendance", {
-        method: "PATCH",
+      const res = await fetch("/api/attendance/punch-out", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ notes: text }),
       });
       const j = await res.json() as { error?: string };
-      if (!res.ok) { toast.error(j.error ?? "Failed to send note"); return; }
-      toast.success("Note sent!");
+      if (!res.ok) { setPunchOutError(j.error ?? "Failed to punch out"); return; }
+      setShowPunchOutConfirm(false);
       setPunchOutNotes("");
-      // Refresh so the saved note replaces the input — this is also what makes
-      // the note visible to the admin without anyone hitting refresh.
+      toast.success("Punched out successfully!");
+      // Refresh so the saved note appears — this is also what makes the note
+      // visible to the admin without anyone hitting refresh.
       await fetchAll();
-    } finally { setSendingNotes(false); }
+    } finally { setActionLoading(false); }
   };
 
   // --- Leave submit (no conflict) -------------------------------------------
@@ -733,42 +733,57 @@ export default function LeavePage() {
         )}
       </div>
 
-      {/* --- Punch-out Notes (optional) ------------------------------------------
-           Appears inline, immediately below the Punch Out button, only once the
-           punch-out has completed and only while no note has been sent yet.
-           No popup, no redirect. Sending it hides this section, which is what
-           enforces one note per attendance record. */}
-      {!loading && hasPunchedOut && !today!.notes && (
-        <div className="bg-white border border-[#e2e7f0] rounded-xl overflow-hidden shadow-sm">
-          <div className="px-4 py-3 border-b border-[#f1f4f9] flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-green-600" />
-            <h2 className="text-sm font-bold text-[#0f1829]">Punch Out Successful</h2>
-          </div>
+      {/* --- Punch Out confirmation (mandatory note) -----------------------------
+           Replaces the old optional inline Notes section. Punch Out opens this
+           modal; the punch-out is only recorded once a reason is entered, and
+           the API rejects an empty note independently of this form. */}
+      {showPunchOutConfirm && (
+        <Modal
+          isOpen
+          title="Confirm Punch Out"
+          onClose={() => { if (!actionLoading) setShowPunchOutConfirm(false); }}
+          size="sm"
+        >
           <div className="p-4 space-y-3">
+            <p className="text-sm text-[#4a5568]">
+              Please enter a reason for punching out. This note is shared with the admin.
+            </p>
             <label className="text-xs font-semibold text-[#4a5568] block">
-              Notes <span className="text-[#8896a9] font-normal">(optional)</span>
+              Reason <span className="text-[#c0392b]">*</span>
             </label>
             <textarea
               value={punchOutNotes}
-              onChange={(e) => setPunchOutNotes(e.target.value)}
-              placeholder="e.g. Worked 30 minutes extra to finish the client meeting"
+              onChange={(e) => { setPunchOutNotes(e.target.value); if (punchOutError) setPunchOutError(""); }}
+              placeholder="e.g. Completed / Accidentally clicked / Extra time worked"
               rows={3}
               maxLength={2000}
-              disabled={sendingNotes}
+              autoFocus
+              disabled={actionLoading}
               className="w-full border border-[#e2e7f0] rounded-lg px-3 py-2.5 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30 resize-none disabled:opacity-60"
             />
-            <div className="flex justify-end">
+            {punchOutError && (
+              <p className="text-xs font-semibold text-[#c0392b]">{punchOutError}</p>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"
-                onClick={handleSendNotes}
-                disabled={sendingNotes || !punchOutNotes.trim()}
-                className="px-5 py-2.5 rounded-xl bg-[#25488e] hover:bg-[#1e3a72] text-white text-sm font-bold transition-colors press-effect disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => setShowPunchOutConfirm(false)}
+                disabled={actionLoading}
+                className="px-4 py-2.5 rounded-xl border border-[#e2e7f0] text-[#4a5568] text-sm font-semibold hover:bg-[#f1f4f9] transition-colors disabled:opacity-50"
               >
-                {sendingNotes ? "Sending…" : "Send Notes"}
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmPunchOut}
+                disabled={actionLoading || !punchOutNotes.trim()}
+                className="px-5 py-2.5 rounded-xl bg-[#ff944d] hover:bg-orange-500 text-white text-sm font-bold transition-colors press-effect disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {actionLoading ? "Punching out…" : "Confirm Punch Out"}
               </button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* --- Attendance History ---------------------------------------------------- */}

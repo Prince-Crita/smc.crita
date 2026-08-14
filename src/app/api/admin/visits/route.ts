@@ -6,6 +6,7 @@ import { getSubtaskTotals, sortVisitsForDisplay } from "@/lib/utils/visit-status
 import { getApprovedLeave } from "@/lib/utils/leave-check";
 import { isCarryForwardVisit } from "@/lib/utils/carry-forward";
 import { resolveClientTaskPlan, createTasksWithSubtasks } from "@/lib/utils/create-visit";
+import { normalizeAssignment } from "@/lib/utils/visit-assignment";
 
 
 // GET /api/admin/visits - All visits with filters
@@ -142,6 +143,10 @@ export async function POST(request: NextRequest) {
       scheduledDate: string;
       endDate?: string;
       notes?: string;
+      // Team assignment (optional — omitting them keeps the previous
+      // single-executive behaviour, so existing callers are unaffected).
+      visitType?: "SOLO" | "TEAM";
+      memberIds?: string[];
     };
 
     const { clientId, executiveId, scheduledDate, endDate, notes } = body;
@@ -149,6 +154,14 @@ export async function POST(request: NextRequest) {
     if (!clientId || !executiveId || !scheduledDate) {
       return NextResponse.json({ error: "clientId, executiveId, and scheduledDate are required" }, { status: 400 });
     }
+
+    const assignment = normalizeAssignment(
+      { visitType: body.visitType, executiveId, memberIds: body.memberIds },
+    );
+    if (assignment.error) {
+      return NextResponse.json({ error: assignment.error }, { status: 400 });
+    }
+    const team = assignment.value;
 
     const scheduledAt = new Date(scheduledDate);
     if (isNaN(scheduledAt.getTime())) {
@@ -166,35 +179,67 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Leave conflict check
-    const leaveConflict = await getApprovedLeave(executiveId, scheduledAt);
-    if (leaveConflict) {
+    // Leave conflict check — every executive on the visit, not just the lead,
+    // so a team member on approved leave is caught at assignment time.
+    for (const execId of [team.leadId, ...team.memberIds]) {
+      const leaveConflict = await getApprovedLeave(execId, scheduledAt);
+      if (!leaveConflict) continue;
+      const who = await prisma.user.findUnique({ where: { id: execId }, select: { name: true } });
+      const isLead = execId === team.leadId;
       return NextResponse.json(
         {
-          error: "Executive is on approved leave on this date. Please select another date or another executive.",
+          error: team.visitType === "TEAM"
+            ? `${who?.name ?? "An executive"} (${isLead ? "Team Lead" : "team member"}) is on approved leave on this date. Please select another date or change the team.`
+            : "Executive is on approved leave on this date. Please select another date or another executive.",
           code: "LEAVE_CONFLICT",
         },
         { status: 409 }
       );
     }
 
-    // Generate visit number
-    const visitCount = await prisma.visit.count();
-    const visitNumber = `V${String(visitCount + 1).padStart(4, "0")}`;
+    // Generate the visit number from the HIGHEST existing V-number, not from
+    // the row count. Counting breaks permanently as soon as any visit is
+    // deleted: the numbering goes sparse (e.g. 63 visits but V0070 is the
+    // highest), so count+1 lands on a number that already exists and the
+    // unique constraint rejects the insert. Same approach as
+    // createVisitForClient's prefix-based numbering.
+    const numbered = await prisma.visit.findMany({
+      where: { visitNumber: { startsWith: "V" } },
+      select: { visitNumber: true },
+    });
+    // Only plain V#### values participate; other conventions (SMC-…) are
+    // ignored, as is any V-prefixed value that is not purely numeric.
+    const highest = numbered.reduce((max, v) => {
+      const m = /^V(\d+)$/.exec(v.visitNumber);
+      return m ? Math.max(max, parseInt(m[1], 10)) : max;
+    }, 0);
+    const visitNumber = `V${String(highest + 1).padStart(4, "0")}`;
 
     const visit = await prisma.visit.create({
       data: {
         visitNumber,
         clientId,
-        executiveId,
+        executiveId: team.leadId,
+        visitType: team.visitType,
         scheduledDate: scheduledAt,
         endDate: endAt,
         notes: notes?.trim() || null,
         status: "PENDING",
+        // Team rows are created alongside the visit so a TEAM visit is never
+        // briefly visible without its members.
+        ...(team.visitType === "TEAM" && {
+          assignments: {
+            create: [
+              { executiveId: team.leadId, role: "LEAD" as const },
+              ...team.memberIds.map((id) => ({ executiveId: id, role: "MEMBER" as const })),
+            ],
+          },
+        }),
       },
       include: {
         client: { select: { name: true, code: true } },
         executive: { select: { name: true, email: true } },
+        assignments: { select: { executiveId: true, role: true, executive: { select: { name: true } } } },
       },
     });
 

@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef, memo, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import {
-  ArrowLeft, CheckCircle2, Circle, RotateCcw, Clock,
+  ArrowLeft, CheckCircle2, Circle, RotateCcw, Clock, Users,
   ChevronDown, ChevronUp, Lock, XCircle, AlertCircle, TrendingUp,
   FileText, Calendar, User, CheckSquare, Save, RefreshCw, Info,
 } from "lucide-react";
@@ -59,6 +59,12 @@ interface Visit {
   executive: { name: string; email: string };
   tasks: Task[];
   activityLogs: ActivityLog[];
+  // Team visits: the API decides who may close, so the button follows
+  // `canClose` rather than any client-side guess.
+  isTeamVisit?: boolean;
+  canClose?: boolean;
+  teamLead?: { id: string; name: string };
+  teamMembers?: { id: string; name: string }[];
 }
 
 // ─── Subtask Item ─────────────────────────────────────────────────────────────
@@ -910,7 +916,9 @@ export default function VisitDetailPage() {
               </button>
             )}
 
-            {visit.status === "OPEN" && (
+            {/* Only the visit owner (solo executive or Team Lead) may close.
+                `canClose` comes from the API, which enforces the same rule. */}
+            {visit.status === "OPEN" && visit.canClose !== false && (
               <button
                 type="button"
                 onClick={() => {
@@ -923,6 +931,11 @@ export default function VisitDetailPage() {
                 <Lock className="w-4 h-4" />
                 Close Visit
               </button>
+            )}
+            {visit.status === "OPEN" && visit.canClose === false && (
+              <span className="px-3 py-2 text-xs font-semibold text-[#8896a9] bg-[#f1f4f9] border border-[#e2e7f0] rounded-lg">
+                Only {visit.teamLead?.name ?? "the Team Lead"} can close this visit
+              </span>
             )}
 
             {visit.status === "CLOSED" && (
@@ -948,6 +961,17 @@ export default function VisitDetailPage() {
             <Calendar className="w-3.5 h-3.5" />
             End: <span className="text-[#4a5568] ml-0.5">{formatDate(visit.endDate ?? visit.scheduledDate)}</span>
           </div>
+          {/* Team visit roster — reuses the existing meta row styling. */}
+          {visit.isTeamVisit && (
+            <div className="flex items-center gap-1.5">
+              <Users className="w-3.5 h-3.5 text-[#25488e]" />
+              Team:
+              <span className="text-[#4a5568] ml-0.5">
+                {visit.teamLead?.name} (Lead)
+                {(visit.teamMembers ?? []).length > 0 && ` · ${(visit.teamMembers ?? []).map((m) => m.name).join(", ")}`}
+              </span>
+            </div>
+          )}
           {visit.openedAt && (
             <div className="flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5" />
@@ -1038,19 +1062,61 @@ export default function VisitDetailPage() {
 
       {/* ── Tasks + Activity ──────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Tasks column */}
+        {/* Tasks column.
+
+            Carry-forward work is kept in its OWN section at the bottom and is
+            never mixed into the normal task list: when a carried subtask joins
+            a client's existing visit, that visit's own scheduled tasks stay on
+            top and the carried items sit below under the "Carry Forward Tasks"
+            heading — the same separation the Task Configuration page uses.
+            Both lists render through the same TaskCard, so completing,
+            reasons and saving behave identically in either section. */}
         <div className="lg:col-span-2 space-y-3">
-          <h2 className="text-base font-semibold text-[#0f1829]">
-            Tasks <span className="text-[#8896a9] font-normal text-sm">({visit.tasks.length})</span>
-          </h2>
-          {visit.tasks.map((task) => (
-            <TaskCard
-              key={task.id}
-              task={task}
-              isEditable={isEditable}
-              onSave={handleSaveTask}
-            />
-          ))}
+          {(() => {
+            const normalTasks = visit.tasks
+              .map((t) => ({ ...t, subtasks: t.subtasks.filter((s) => !s.isCarriedForward) }))
+              .filter((t) => t.subtasks.length > 0);
+            const carriedTasks = visit.tasks
+              .map((t) => ({ ...t, subtasks: t.subtasks.filter((s) => s.isCarriedForward) }))
+              .filter((t) => t.subtasks.length > 0);
+            const carriedCount = carriedTasks.reduce((s, t) => s + t.subtasks.length, 0);
+
+            return (
+              <>
+                <h2 className="text-base font-semibold text-[#0f1829]">
+                  Tasks <span className="text-[#8896a9] font-normal text-sm">({normalTasks.length})</span>
+                </h2>
+                {normalTasks.map((task) => (
+                  <TaskCard key={task.id} task={task} isEditable={isEditable} onSave={handleSaveTask} />
+                ))}
+                {normalTasks.length === 0 && (
+                  <p className="text-sm text-[#8896a9] bg-white border border-[#e2e7f0] rounded-xl p-4">
+                    This visit has no newly scheduled tasks.
+                  </p>
+                )}
+
+                {carriedTasks.length > 0 && (
+                  <div className="pt-2 space-y-3">
+                    <div className="flex items-center gap-2.5 px-1">
+                      <div className="p-1.5 rounded-lg bg-orange-50 border border-orange-100 flex-shrink-0">
+                        <RotateCcw className="w-3.5 h-3.5 text-[#ff944d]" />
+                      </div>
+                      <div className="min-w-0">
+                        <h2 className="text-base font-semibold text-[#0f1829]">
+                          Carry Forward Tasks{" "}
+                          <span className="text-[#8896a9] font-normal text-sm">({carriedCount})</span>
+                        </h2>
+                        <p className="text-xs text-[#8896a9]">Carried from a previous visit</p>
+                      </div>
+                    </div>
+                    {carriedTasks.map((task) => (
+                      <TaskCard key={`cf-${task.id}`} task={task} isEditable={isEditable} onSave={handleSaveTask} />
+                    ))}
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
 
         {/* Activity sidebar */}

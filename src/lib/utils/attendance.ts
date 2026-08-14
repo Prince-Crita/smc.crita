@@ -19,6 +19,21 @@
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
 /** Normalize a date to midnight IST (UTC+5:30), returned as a UTC instant. */
+/**
+ * The IST calendar date of `d` as "YYYY-MM-DD".
+ *
+ * Use this instead of `new Date().toISOString().split("T")[0]` anywhere a date
+ * is sent to an attendance endpoint. Between 00:00 and 05:30 IST the UTC date
+ * is still the PREVIOUS day, so a UTC-derived string asks the API for the
+ * wrong IST day and today's punch-ins drop out of the result (executives who
+ * had punched in showed as "Absent"). The API already keys and filters by the
+ * IST day — this keeps the caller on the same boundary.
+ */
+export function istDateString(d: Date = new Date()): string {
+  const shifted = new Date(d.getTime() + IST_OFFSET_MS);
+  return shifted.toISOString().split("T")[0];
+}
+
 export function toMidnightIST(d: Date): Date {
   const shifted = new Date(d.getTime() + IST_OFFSET_MS);
   const istMidnightAsUTC = Date.UTC(

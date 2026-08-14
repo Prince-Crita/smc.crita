@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/db/prisma";
 import { completeSubtasksSchema } from "@/lib/validations/task";
+import { canWorkVisit } from "@/lib/utils/visit-access";
 
 // PATCH /api/tasks/[taskId]/complete - Save subtask completion state
 // NOTE: This endpoint saves whatever state the frontend sends.
@@ -28,17 +29,26 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     const { subtasks, mdMeetingAnswer } = result.data;
 
-    // Verify the task belongs to a visit assigned to this executive
+    // Verify the task belongs to a visit this executive works — the solo
+    // executive, the team lead, or a team member. Members complete their own
+    // share of a team visit's subtasks; only closing is lead-only.
     const task = await prisma.task.findUnique({
       where: { id: taskId },
       include: {
-        visit: { select: { executiveId: true, status: true, visitNumber: true } },
+        visit: {
+          select: {
+            executiveId: true,
+            status: true,
+            visitNumber: true,
+            assignments: { select: { executiveId: true, role: true } },
+          },
+        },
         subtasks: true,
       },
     });
 
     if (!task) return NextResponse.json({ error: "Task not found" }, { status: 404 });
-    if (task.visit.executiveId !== user.userId)
+    if (!canWorkVisit(task.visit, user.userId))
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     if (task.visit.status !== "OPEN") {
       return NextResponse.json({ error: "Visit must be open to update tasks" }, { status: 400 });

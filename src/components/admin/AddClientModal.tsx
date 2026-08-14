@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { X, Plus } from "lucide-react";
 import toast from "react-hot-toast";
+import { revalidateAll } from "@/lib/hooks/useLiveQuery";
 
 interface Client {
   id: string;
@@ -44,6 +45,27 @@ export function AddClientModal({ client, executives, onClose, onSuccess }: AddCl
     endDate:   client?.endDate   ? new Date(client.endDate).toISOString().split("T")[0]   : "",
   });
 
+  // Solo (previous behaviour) or Team. `assignedExecId` doubles as the Team
+  // Lead when TEAM. Prefilled from the client's current visit when editing.
+  const [visitType, setVisitType] = useState<"SOLO" | "TEAM">("SOLO");
+  const [memberIds, setMemberIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!client?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/admin/clients/${client.id}/assignment`);
+        if (!res.ok) return;
+        const j = await res.json() as { assignment?: { visitType: "SOLO" | "TEAM"; teamLead: { id: string } | null; teamMembers: { id: string }[] } };
+        if (cancelled || !j.assignment) return;
+        setVisitType(j.assignment.visitType);
+        setMemberIds(j.assignment.teamMembers.map((m) => m.id));
+      } catch { /* prefill is best-effort */ }
+    })();
+    return () => { cancelled = true; };
+  }, [client?.id]);
+
   const [reportEmails, setReportEmails] = useState<string[]>(client?.reportEmails ?? []);
   const [emailInput, setEmailInput]     = useState("");
   const [errors, setErrors]             = useState<Record<string, string>>({});
@@ -73,6 +95,13 @@ export function AddClientModal({ client, executives, onClose, onSuccess }: AddCl
     if (!form.code.trim())          errs.code          = "Client code is required";
     if (!form.contactPerson.trim()) errs.contactPerson = "Contact person is required";
     if (!form.address.trim())       errs.address       = "Address is required";
+    // The assignment rules the server enforces, checked here too so the admin
+    // is told what is missing instead of the save appearing to succeed while
+    // the assignment is quietly rejected.
+    if (visitType === "TEAM") {
+      if (!form.assignedExecId) errs.assignedExecId = "Select a Team Lead";
+      else if (memberIds.length === 0) errs.assignedExecId = "A Team Visit needs at least one team member besides the Team Lead";
+    }
     return errs;
   };
 
@@ -95,14 +124,32 @@ export function AddClientModal({ client, executives, onClose, onSuccess }: AddCl
         assignedExecId: form.assignedExecId || null,
         startDate:      form.startDate || null,
         endDate:        form.endDate   || null,
+        // Applied to the client's visit; omitted members keep it Solo.
+        visitType,
+        ...(visitType === "TEAM" ? { memberIds } : {}),
       };
 
       const res  = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const data = await res.json();
-      if (!res.ok) { toast.error(data.error || "Failed to save"); return; }
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(data?.error || `Failed to save — server responded ${res.status} ${res.statusText}`);
+        return;
+      }
 
-      toast.success(isEdit ? "Client updated" : "Client added successfully");
+      // The client row can save while the visit/assignment part of the same
+      // request could not be applied. Reporting only "Client updated" there is
+      // what made an assignment change look like it had synced when it had
+      // not — the warning is now shown instead of being discarded.
+      if (data?.visitWarning) {
+        toast.error(`Client saved, but the visit assignment was not applied: ${data.visitWarning}`, { duration: 6000 });
+      } else {
+        toast.success(isEdit ? "Client updated" : "Client added successfully");
+      }
       onSuccess();
+      // Every other mounted screen showing this data (admin visits, calendar,
+      // dashboard, and the executive's own lists in this session) refetches
+      // once. Mutation-driven, not polling.
+      revalidateAll();
       onClose();
     } catch {
       toast.error("An error occurred");
@@ -253,13 +300,41 @@ export function AddClientModal({ client, executives, onClose, onSuccess }: AddCl
             )}
           </div>
 
-          {/* Assigned Executive */}
+          {/* Visit Type + assignment — replaces the single-executive picker.
+              Solo keeps the previous behaviour exactly; Team adds a lead and
+              members. Applies to the client's visit when it is saved. */}
           <div>
-            <label className="block text-xs text-[#4a5568] mb-1.5 font-semibold">Assigned Executive</label>
+            <label className="block text-xs text-[#4a5568] mb-1.5 font-semibold">Visit Type</label>
+            <div className="flex gap-2">
+              {(["SOLO", "TEAM"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => { setVisitType(t); setMemberIds([]); }}
+                  className={
+                    "flex-1 py-2 rounded-lg text-sm font-semibold border transition-colors " +
+                    (visitType === t
+                      ? "bg-[#25488e] text-white border-[#25488e]"
+                      : "bg-white text-[#4a5568] border-[#e2e7f0] hover:bg-[#f1f4f9]")
+                  }
+                >
+                  {t === "SOLO" ? "Solo Visit" : "Team Visit"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-[#4a5568] mb-1.5 font-semibold">
+              {visitType === "TEAM" ? "Team Lead" : "Assigned Executive"}
+            </label>
             <select
               className={inputClass}
               value={form.assignedExecId}
-              onChange={(e) => update("assignedExecId", e.target.value)}
+              onChange={(e) => {
+                update("assignedExecId", e.target.value);
+                setMemberIds((prev) => prev.filter((id) => id !== e.target.value));
+              }}
             >
               <option value="">— None —</option>
               {executives.map((ex) => (
@@ -267,6 +342,33 @@ export function AddClientModal({ client, executives, onClose, onSuccess }: AddCl
               ))}
             </select>
           </div>
+
+          {visitType === "TEAM" && (
+            <div>
+              <label className="block text-xs text-[#4a5568] mb-1.5 font-semibold">Team Members</label>
+              {/* The Team Lead is filtered out, so the same executive can never
+                  be selected twice — the API enforces the same rule. */}
+              <div className="border border-[#e2e7f0] rounded-lg divide-y divide-[#f1f4f9] max-h-40 overflow-y-auto">
+                {executives.filter((ex) => ex.id !== form.assignedExecId).map((ex) => {
+                  const checked = memberIds.includes(ex.id);
+                  return (
+                    <label key={ex.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[#f8fafc]">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => setMemberIds((p) => checked ? p.filter((id) => id !== ex.id) : [...p, ex.id])}
+                        className="w-4 h-4 accent-[#25488e]"
+                      />
+                      <span className="text-sm text-[#0f1829]">{ex.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-[#8896a9] mt-1">
+                {memberIds.length} member{memberIds.length === 1 ? "" : "s"} selected. Only the Team Lead can close a team visit.
+              </p>
+            </div>
+          )}
 
           {/* Row: Start Date + End Date */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

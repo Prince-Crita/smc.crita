@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils/utils";
 import { SkeletonTable } from "@/components/ui/Skeleton";
 import { Modal } from "@/components/ui/Modal";
 import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
+import { istDateString } from "@/lib/utils/attendance";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Executive { id: string; name: string; email: string }
@@ -122,9 +123,10 @@ export default function AdminAttendancePage() {
 
 // ─── Daily View ─────────────────────────────────────────────────────────────
 function DailyAttendanceView() {
-  const [dateFilter, setDateFilter] = useState(
-    () => new Date().toISOString().split("T")[0]
-  );
+  // IST calendar date, not the UTC one: between 00:00 and 05:30 IST the UTC
+  // date is still yesterday, which asked the API for the wrong day and made
+  // executives who had already punched in show as "Absent".
+  const [dateFilter, setDateFilter] = useState(() => istDateString());
   const [execFilter, setExecFilter] = useState("");
   const [noteRecord, setNoteRecord] = useState<AttendanceRecord | null>(null);
 

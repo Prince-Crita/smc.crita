@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { isAdminRole } from "@/lib/auth/roles";
 import { createVisitForClient } from "@/lib/utils/create-visit";
+import { recordOperation } from "@/lib/utils/admin-operations";
+import { applyAssignment, normalizeAssignment } from "@/lib/utils/visit-assignment";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getAuthUser(request);
@@ -50,9 +52,28 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   try {
     const body = await request.json();
     const { name, contactPerson, address, phone, email, reportEmails, assignedExecId, startDate, endDate, isArchived } = body;
+    // Solo/Team assignment for the client's active visit (Admin → Client → Edit).
+    const visitType: "SOLO" | "TEAM" | undefined = body.visitType;
+    const memberIds: string[] | undefined = body.memberIds;
 
     const existing = await prisma.client.findUnique({ where: { id } });
     if (!existing) return NextResponse.json({ error: "Client not found" }, { status: 404 });
+
+    // ── Validate the assignment BEFORE writing anything ─────────────────────
+    // This used to be validated deep inside the visit-sync block further down,
+    // where a rejected assignment (e.g. "Team Visit" with no members) was
+    // swallowed into a `visitWarning` on an otherwise 200 response. The Edit
+    // Client modal only checks res.ok, so the admin was told "Client updated"
+    // while the assignment had silently not been applied — which is exactly
+    // the "assignment does not sync" report. A bad assignment is now a 400
+    // with the real message, and nothing is written.
+    if (visitType) {
+      const check = normalizeAssignment(
+        { visitType, executiveId: (assignedExecId !== undefined ? assignedExecId : existing.assignedExecId) || undefined, memberIds },
+        existing.assignedExecId ?? undefined
+      );
+      if (check.error) return NextResponse.json({ error: check.error }, { status: 400 });
+    }
 
     // Detect if the executive assignment is changing
     const prevExecId = existing.assignedExecId;
@@ -85,6 +106,27 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       include: { assignedExec: { select: { id: true, name: true, email: true } } },
     });
 
+    // Record before/after so a Super Admin can genuinely reverse this edit.
+    await recordOperation({
+      userId: user.userId,
+      action: "CLIENT_UPDATED",
+      entityType: "Client",
+      entityId: id,
+      summary: `Client "${updated.name}" edited by ${user.name}`,
+      before: {
+        name: existing.name, contactPerson: existing.contactPerson, address: existing.address,
+        phone: existing.phone, email: existing.email, reportEmails: existing.reportEmails,
+        assignedExecId: existing.assignedExecId, startDate: existing.startDate,
+        endDate: existing.endDate, isArchived: existing.isArchived,
+      },
+      after: {
+        name: updated.name, contactPerson: updated.contactPerson, address: updated.address,
+        phone: updated.phone, email: updated.email, reportEmails: updated.reportEmails,
+        assignedExecId: updated.assignedExecId, startDate: updated.startDate,
+        endDate: updated.endDate, isArchived: updated.isArchived,
+      },
+    });
+
     const wasArchived = isArchived === true && !existing.isArchived;
     await prisma.activityLog.create({
       data: {
@@ -107,6 +149,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     // executives own the visit" duplication bug + wrong visit date bug).
     let visitInfo = null;
     let visitError: string | null = null;
+
     if (execAssigned || (datesChanged && newExecId)) {
       try {
         const activeVisits = await prisma.visit.findMany({
@@ -166,6 +209,37 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       } catch (visitErr) {
         console.error("[create-visit] Failed to sync visit after client update:", visitErr);
         visitError = visitErr instanceof Error ? visitErr.message : String(visitErr);
+      }
+    }
+
+    // ── Solo/Team assignment on the client's ACTIVE visits ──────────────────
+    // Runs AFTER the block above on purpose. When a client had no active visit
+    // yet, that block is what creates one — applying the assignment first (as
+    // this used to) meant the brand-new visit was never given its team rows,
+    // so "Solo → Team" on such a client silently produced a SOLO visit.
+    //
+    // Existing visits are updated IN PLACE: visit id, history, task
+    // configuration, task/subtask completion and the visit date are all
+    // preserved, and a second visit is never created just because the
+    // assignment changed.
+    if (visitType) {
+      try {
+        const activeVisits = await prisma.visit.findMany({
+          where: { clientId: id, status: { in: ["PENDING", "OPEN"] } },
+          select: { id: true, executiveId: true },
+        });
+        for (const v of activeVisits) {
+          const normalized = normalizeAssignment(
+            { visitType, executiveId: newExecId ?? v.executiveId, memberIds },
+            v.executiveId
+          );
+          // Already validated up-front; this can only be a genuine surprise.
+          if (normalized.error) { visitError = normalized.error; break; }
+          await applyAssignment(prisma, v.id, normalized.value);
+        }
+      } catch (err) {
+        console.error("[client-edit] assignment update failed:", err);
+        visitError = err instanceof Error ? err.message : String(err);
       }
     }
 
@@ -258,6 +332,19 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
         action: "CLIENT_DELETED",
         metadata: { clientId: id, clientName: existing.name, deletedBy: user.name, removed },
       },
+    });
+
+    // Logged for the Super Admin activity view, but explicitly NOT reversible:
+    // the client's visits, tasks and subtasks were cascade-deleted, and
+    // fabricating that tree back would invent ids and break relations.
+    await recordOperation({
+      userId: user.userId,
+      action: "CLIENT_DELETED",
+      entityType: "Client",
+      entityId: id,
+      summary: `Client "${existing.name}" deleted by ${user.name} (${removed.visits} visits, ${removed.subtasks} subtasks)`,
+      before: { name: existing.name, removed },
+      isReversible: false,
     });
 
     return NextResponse.json({ success: true, removed });
