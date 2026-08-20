@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { assetPath } from "@/lib/utils/asset-path";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, memo } from "react";
 import toast from "react-hot-toast";
@@ -123,7 +124,7 @@ function SidebarLogo({ collapsed }: { collapsed: boolean }) {
         /* Collapsed: white rounded badge, logo scaled down, no crop */
         <div className="w-full bg-white rounded-lg shadow-sm px-1.5 py-1.5 flex items-center justify-center">
           <Image
-            src="/logo.png"
+            src={assetPath("/logo.png")}
             alt="Shaabi Management Consultancy"
             width={600}
             height={200}
@@ -135,7 +136,7 @@ function SidebarLogo({ collapsed }: { collapsed: boolean }) {
         /* Expanded: white rounded container, full horizontal logo centered */
         <div className="w-full bg-white rounded-xl shadow-sm px-4 py-3 flex items-center justify-center">
           <Image
-            src="/logo.png"
+            src={assetPath("/logo.png")}
             alt="Shaabi Management Consultancy"
             width={600}
             height={200}

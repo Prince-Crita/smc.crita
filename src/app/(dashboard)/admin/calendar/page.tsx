@@ -1,16 +1,17 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, memo } from "react";
 import {
   ChevronLeft, ChevronRight, Plus, RotateCcw, Building2,
   Users, CalendarDays, AlertCircle, CheckCircle2,
 } from "lucide-react";
-import { cn } from "@/lib/utils/utils";
+import { cn, formatDate } from "@/lib/utils/utils";
 import { Modal } from "@/components/ui/Modal";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import Link from "next/link";
 import toast from "react-hot-toast";
-import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
+import { useLiveQuery, fetchJSON, revalidateAll } from "@/lib/hooks/useLiveQuery";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface CalendarVisit {
@@ -349,12 +350,18 @@ function RescheduleModal({ visit, onClose, onRescheduled }: RescheduleModalProps
 }
 
 // ─── Admin Visit Card ──────────────────────────────────────────────────────────
-function AdminVisitCard({
+// memo'd: a week can hold dozens of these, and every card re-rendered whenever
+// any unrelated page state changed (week label, exec filter dropdown, the
+// delete dialog opening). The props are primitives + stable callbacks, so a
+// shallow compare is exact here.
+const AdminVisitCard = memo(function AdminVisitCard({
   visit,
   onReschedule,
+  onDelete,
 }: {
   visit: CalendarVisit;
   onReschedule: (v: CalendarVisit) => void;
+  onDelete: (v: CalendarVisit) => void;
 }) {
   const statusColors: Record<string, string> = {
     CLOSED:      "border-l-green-500  bg-green-50",
@@ -385,19 +392,25 @@ function AdminVisitCard({
           className="text-[10px] font-semibold text-[#800040] hover:underline">
           Reschedule
         </button>
+        <span className="text-[#c8d2e0]">·</span>
+        <button onClick={() => onDelete(visit)}
+          className="text-[10px] font-semibold text-red-600 hover:underline">
+          Delete
+        </button>
       </div>
     </div>
   );
-}
+});
 
 // ─── Desktop Day Column ────────────────────────────────────────────────────────
-function DayColumn({
-  day, isToday, onAddVisit, onReschedule,
+const DayColumn = memo(function DayColumn({
+  day, isToday, onAddVisit, onReschedule, onDelete,
 }: {
   day: CalendarDay;
   isToday: boolean;
   onAddVisit: (dateISO: string) => void;
   onReschedule: (v: CalendarVisit) => void;
+  onDelete: (v: CalendarVisit) => void;
 }) {
   return (
     <div className={cn(
@@ -423,7 +436,7 @@ function DayColumn({
           <p className="text-[10px] text-[#c8d2e0] text-center py-3">—</p>
         ) : (
           day.visits.map((v) => (
-            <AdminVisitCard key={v.id} visit={v} onReschedule={onReschedule} />
+            <AdminVisitCard key={v.id} visit={v} onReschedule={onReschedule} onDelete={onDelete} />
           ))
         )}
         {/* Add button */}
@@ -436,7 +449,7 @@ function DayColumn({
       </div>
     </div>
   );
-}
+});
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function AdminCalendarPage() {
@@ -449,6 +462,7 @@ export default function AdminCalendarPage() {
   const [showCreate, setShowCreate]           = useState(false);
   const [createPrefillDate, setCreatePrefillDate] = useState("");
   const [rescheduleVisit, setRescheduleVisit] = useState<CalendarVisit | null>(null);
+  const [deleteVisit, setDeleteVisit]         = useState<CalendarVisit | null>(null);
 
   const fetchCalendar = useCallback(async () => {
     const params = new URLSearchParams({ week: weekISO });
@@ -457,7 +471,7 @@ export default function AdminCalendarPage() {
   }, [weekISO, execFilter]);
 
   // Fetch once on mount / week change; refreshed only by explicit mutations. No polling.
-  const { data, loading, refresh } = useLiveQuery(fetchCalendar);
+  const { data, loading, refresh, setData } = useLiveQuery(fetchCalendar);
 
   // Fetch clients + executives once. `meta=1` returns ONLY the dropdown
   // options — this used to download every visit with all tasks/subtasks just
@@ -472,11 +486,49 @@ export default function AdminCalendarPage() {
   const goToNext = () => setWeekISO((w) => nextMonday(w));
   const goToToday = () => setWeekISO(new Date().toISOString());
 
-  const handleAddVisit = (dateISO: string) => {
+  const handleAddVisit = useCallback((dateISO: string) => {
     setCreatePrefillDate(dateISO);
     setShowCreate(true);
+  }, []);
+  // Stable identities so the memo'd day columns / visit cards don't re-render
+  // on every keystroke elsewhere on the page.
+  const handleReschedule = useCallback((v: CalendarVisit) => setRescheduleVisit(v), []);
+  const handleDelete     = useCallback((v: CalendarVisit) => setDeleteVisit(v), []);
+
+  // ── Delete ONE visit occurrence ──────────────────────────────────────────
+  // Scoped to this visit's id only — the client, its other visits, its task
+  // configuration and its subtask templates are untouched (see the API route
+  // and lib/utils/delete-visit.ts).
+  //
+  // On success the card is removed from the already-loaded week immediately
+  // (no full-page reload, no skeleton flash), then revalidateAll() refetches
+  // every other mounted live query — admin dashboard, visit lists, client
+  // history, carry-forward — so nothing anywhere still shows the deleted
+  // visit. The assigned executive's screens pick it up on their next
+  // focus/visibility revalidation, which is how this app already syncs
+  // across users.
+  const confirmDelete = async () => {
+    if (!deleteVisit) return;
+    const target = deleteVisit;
+    try {
+      const res = await fetch(`/api/admin/visits/${target.id}?allowClosed=1`, { method: "DELETE" });
+      const json = await res.json().catch(() => ({} as { error?: string }));
+      if (!res.ok) {
+        toast.error((json as { error?: string }).error ?? "Failed to delete visit");
+        return;
+      }
+      setDeleteVisit(null);
+      setData((prev) =>
+        prev
+          ? { ...prev, days: prev.days.map((d) => ({ ...d, visits: d.visits.filter((v) => v.id !== target.id) })) }
+          : prev
+      );
+      toast.success(`Visit deleted for ${target.client.name}`);
+      revalidateAll();
+    } catch {
+      toast.error("Error deleting visit");
+    }
   };
-  const handleReschedule = (v: CalendarVisit) => setRescheduleVisit(v);
 
   const totalVisits = data?.days.reduce((s, d) => s + d.visits.length, 0) ?? 0;
   const closedCount = data?.days.reduce((s, d) => s + d.visits.filter((v) => v.displayStatus === "CLOSED").length, 0) ?? 0;
@@ -501,6 +553,45 @@ export default function AdminCalendarPage() {
           onRescheduled={refresh}
         />
       )}
+      {/* Delete confirmation — names the client and the exact visit date so
+          the wrong occurrence can't be deleted by accident. */}
+      <ConfirmDialog
+        isOpen={!!deleteVisit}
+        title="Delete Visit"
+        danger
+        confirmLabel="Delete Visit"
+        onCancel={() => setDeleteVisit(null)}
+        onConfirm={confirmDelete}
+        message={deleteVisit ? (
+          <div className="space-y-2">
+            <p>
+              Delete the visit for{" "}
+              <span className="font-semibold text-[#0f1829]">{deleteVisit.client.name}</span>{" "}
+              on{" "}
+              <span className="font-semibold text-[#0f1829]">{formatDate(deleteVisit.scheduledDate)}</span>?
+            </p>
+            <p className="text-xs text-[#8896a9]">
+              {deleteVisit.visitNumber} · {deleteVisit.executive.name}
+            </p>
+            <p className="text-xs">
+              Only this visit and its own tasks, subtasks and history are removed. The client,
+              its other visits and its task configuration are not affected.
+            </p>
+            {deleteVisit.displayStatus === "CLOSED" && (
+              <p className="text-xs font-semibold text-red-600">
+                This visit is already closed — its completed audit record will be permanently removed.
+              </p>
+            )}
+            {deleteVisit.hasCarryForward && (
+              <p className="text-xs font-semibold text-[#ff944d]">
+                This visit carries forwarded work. Those carried items are removed with it and will
+                not reappear on another visit.
+              </p>
+            )}
+          </div>
+        ) : ""}
+      />
+
 
       {/* ── Header ── */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -581,6 +672,7 @@ export default function AdminCalendarPage() {
               isToday={isTodayDate(day.date)}
               onAddVisit={handleAddVisit}
               onReschedule={handleReschedule}
+              onDelete={handleDelete}
             />
           ))}
         </div>

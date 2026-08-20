@@ -9,6 +9,28 @@ import { isAdminRole } from "@/lib/auth/roles";
 // cookie instead (see those routes).
 const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/auth/continue", "/api/auth/forget"];
 
+// Development-only diagnostics. /api/dev/* answers 404 when NODE_ENV is
+// "production", so this can never be reached on a deployed server. It is
+// reachable without a session on purpose: you need it most when the database
+// is misconfigured and logging in is exactly what does not work.
+const DEV_ONLY_PATHS = ["/api/dev/"];
+
+
+// Build a redirect target from the INCOMING url so the app's mount point is
+// preserved. request.nextUrl.clone() keeps nextUrl.basePath, and assigning
+// .pathname sets the path *after* it — so the same code emits "/login" when
+// the app is served from the domain root, and
+// "/client-trial/smc-task-management/login" when it is served from a sub-path
+// behind a reverse proxy. `new URL("/login", request.url)` (the previous form)
+// always resolves against the ORIGIN, which drops the prefix and sends the
+// browser outside the proxied location.
+function redirectTo(request: NextRequest, pathname: string) {
+  const url = request.nextUrl.clone();
+  url.pathname = pathname;
+  url.search = "";
+  return NextResponse.redirect(url);
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -17,16 +39,20 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  if (process.env.NODE_ENV !== "production" && DEV_ONLY_PATHS.some((p) => pathname.startsWith(p))) {
+    return NextResponse.next();
+  }
+
   const token = request.cookies.get(COOKIE_NAME)?.value;
 
   if (!token) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    return redirectTo(request, "/login");
   }
 
   const payload = await verifyJwt(token);
 
   if (!payload) {
-    const response = NextResponse.redirect(new URL("/login", request.url));
+    const response = redirectTo(request, "/login");
     response.cookies.delete(COOKIE_NAME);
     return response;
   }
@@ -34,20 +60,20 @@ export async function proxy(request: NextRequest) {
   // Role-based redirect from root
   if (pathname === "/") {
     if (isAdminRole(payload.role)) {
-      return NextResponse.redirect(new URL("/admin", request.url));
+      return redirectTo(request, "/admin");
     } else {
-      return NextResponse.redirect(new URL("/executive", request.url));
+      return redirectTo(request, "/executive");
     }
   }
 
   // Admin route protection
   if (pathname.startsWith("/admin") && !isAdminRole(payload.role)) {
-    return NextResponse.redirect(new URL("/executive", request.url));
+    return redirectTo(request, "/executive");
   }
 
   // Executive route protection
   if (pathname.startsWith("/executive") && payload.role !== "EXECUTIVE") {
-    return NextResponse.redirect(new URL("/admin", request.url));
+    return redirectTo(request, "/admin");
   }
 
   return NextResponse.next();

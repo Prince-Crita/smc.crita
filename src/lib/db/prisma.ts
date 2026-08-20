@@ -17,6 +17,11 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
+import {
+  assertSafeDatabaseTarget,
+  describeDatabaseTarget,
+  formatDatabaseTarget,
+} from "@/lib/db/database-target";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -43,7 +48,21 @@ function createPrismaClient(): PrismaClient {
   if (!connectionString) {
     throw new Error(
       "DATABASE_URL environment variable is not set. " +
-        "Set it in your .env.local (local) or Vercel project settings (production)."
+        "Set it in .env.development.local (local development) or in the " +
+        "deployment's environment (Vercel / company server)."
+    );
+  }
+
+  // A development or test process may only talk to a local database. See
+  // lib/db/database-target.ts for why this is a hard failure and how to
+  // override it deliberately (ALLOW_REMOTE_DB=1).
+  assertSafeDatabaseTarget(connectionString);
+
+  // Say out loud which database this process is using. Host, port, database
+  // and role only — never the password or the connection string.
+  if (process.env.NODE_ENV !== "production") {
+    console.log(
+      `[db] ${process.env.NODE_ENV ?? "unknown"} → ${formatDatabaseTarget(describeDatabaseTarget(connectionString))}`
     );
   }
 
@@ -69,7 +88,44 @@ function createPrismaClient(): PrismaClient {
   return new PrismaClient({ adapter } as any);
 }
 
-export const prisma: PrismaClient =
-  globalForPrisma.prisma ?? (globalForPrisma.prisma = createPrismaClient());
+/**
+ * The client is created on FIRST USE, not when this module is imported.
+ *
+ * `next build` imports every route module to collect page data. With eager
+ * creation, that import alone demanded a reachable DATABASE_URL — so a build
+ * could only succeed if a connection string happened to be present, and it
+ * would happily have been the production one. A build should not need a
+ * database at all, and a missing DATABASE_URL should surface as a clear
+ * runtime error on the first query rather than as a build failure.
+ *
+ * The Proxy is transparent: `prisma.visit.findMany(...)`, `prisma.$transaction(...)`
+ * and every other call behave exactly as before, and the singleton is still
+ * cached on globalThis so hot-module reloading does not pile up clients.
+ */
+function getPrismaClient(): PrismaClient {
+  if (!globalForPrisma.prisma) {
+    globalForPrisma.prisma = createPrismaClient();
+  }
+  return globalForPrisma.prisma;
+}
+
+export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
+  get(_target, prop, receiver) {
+    const client = getPrismaClient() as unknown as Record<string | symbol, unknown>;
+    const value = Reflect.get(client, prop, receiver);
+    // Methods must stay bound to the real client ($transaction, $queryRaw, …).
+    return typeof value === "function" ? value.bind(client) : value;
+  },
+  has(_target, prop) {
+    return prop in (getPrismaClient() as unknown as object);
+  },
+  ownKeys() {
+    return Reflect.ownKeys(getPrismaClient() as unknown as object);
+  },
+  getOwnPropertyDescriptor(_target, prop) {
+    const d = Reflect.getOwnPropertyDescriptor(getPrismaClient() as unknown as object, prop);
+    return d && { ...d, configurable: true };
+  },
+});
 
 export default prisma;

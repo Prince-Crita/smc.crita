@@ -316,6 +316,11 @@ stateDiagram-v2
 * **Derived State Caching:** Aggregations (progress counts, filtered lists) cached via `useMemo`.
 * **Layout Skeletons:** Implemented Next.js `loading.tsx` Suspense boundaries for immediate transition feedback.
 * **API Payload Minimization:** Mobile API endpoints strip unused relation IDs and timestamps to dramatically reduce JSON payload size over cellular networks.
+* **Per-visit subtask COUNTs, not subtask rows:** every list screen needs three numbers per visit (total / completed / carried-forward). These used to be produced by loading EVERY subtask row of every visit and counting them in JavaScript. `src/lib/utils/visit-aggregates.ts` asks PostgreSQL for the counts instead — one row per visit rather than one row per subtask — and `/api/admin/stats`, `/api/admin/visits`, `/api/admin/executives`, `/api/admin/executives/[id]`, `/api/calendar` and `/api/visits` all go through it. Use it for any new endpoint that needs visit progress; never re-add a `tasks: { select: { subtasks: ... } }` include to a list endpoint.
+* **Lists no longer serialise the task tree:** the visit lists used to spread the whole Prisma row (including `tasks[].subtasks[]`) into the JSON response. They now return only the fields the UI reads.
+* **One layout is built, not two:** the admin dashboard and admin visit list ship a desktop layout and a mobile layout in the same component and let CSS hide one. CSS hides — it does not skip — so both were being rendered on every device. `src/lib/hooks/useIsDesktop.ts` gates them on the same 768px breakpoint the classes use.
+* **Database indexes:** `prisma/sql/performance-indexes.sql` (mirrored by the `@@index` declarations in `prisma/schema.prisma`). PostgreSQL does not index foreign keys automatically, so visit lookups by client/executive/date and every `activity_logs` lookup were sequential scans. **This file must be applied to any database that predates it** — see §16b.
+* **No HTTP caching of API responses:** `next.config.ts` sets `Cache-Control: private, no-store` on `/api/*`. An earlier `s-maxage` + `stale-while-revalidate` header let a browser answer `/api/visits` from its own cache, so an executive could still see a visit an admin had just deleted. Admin ↔ Executive synchronisation depends on every API read reaching the server; do not reintroduce caching on these routes.
 
 ---
 
@@ -373,6 +378,108 @@ RESEND_API_KEY="re_123456789"
 
 ---
 
+## 16a. Local development environment (which database am I using?)
+
+**One rule: local development uses the local PostgreSQL server, and nothing else.**
+
+### Where DATABASE_URL comes from
+
+Next.js loads env files in this order for `npm run dev`, and the FIRST source to
+define a key wins:
+
+| Precedence | Source | Holds DATABASE_URL? |
+|---|---|---|
+| 1 (highest) | `DATABASE_URL` set in your **shell** | overrides everything |
+| 2 | `.env.development.local` | **yes — the local PostgreSQL server** |
+| 3 | `.env.local` | **no, deliberately** (shared config only) |
+
+`.env.local` used to carry the production connection string. Because Next.js
+loads it alongside `.env.development.local`, that was one renamed file away from
+pointing local development at the live company database. The production URL now
+lives only where it is actually needed:
+
+* company / standalone build → `.env.build`
+* Vercel → the Vercel project's environment variables (unchanged)
+
+### The shell is the trap
+
+A `DATABASE_URL` (or `NODE_ENV`, or `PORT`) left over in a PowerShell session
+outranks every file above, and Next.js still prints
+`Environments: .env.development.local, .env.local` regardless — the banner tells
+you which files it *read*, not which value *won*. Check and clear them with:
+
+```powershell
+$env:DATABASE_URL          # should print nothing
+$env:NODE_ENV              # should print nothing — Next sets it itself
+$env:PORT                  # should print nothing
+$env:DATABASE_URL = $null
+```
+
+### Two safety nets
+
+1. **The dev server refuses to start against a remote database.**
+   `src/instrumentation.ts` checks the target before the first request and
+   exits with an explanation (`src/lib/db/database-target.ts`). Deliberately
+   override with `ALLOW_REMOTE_DB=1`. The check keys off the npm script, not
+   `NODE_ENV`, so a stale `NODE_ENV=production` cannot switch it off.
+
+2. **Every non-production start prints its target**, secret-free:
+
+   ```
+   [db] development → host=localhost port=5432 db=smc_task_dev user=postgres
+   ```
+
+The Prisma CLI follows the same precedence (`prisma.config.ts`) and prints its
+target too — `prisma db push` / `migrate` / `studio` / `seed` now default to the
+LOCAL database instead of production.
+
+### Verifying at runtime
+
+Reading env files tells you what should happen. This tells you what did:
+
+```
+GET http://localhost:3000/api/dev/db-target
+```
+
+It reports environment, host, port, database name and role — never a password
+or connection string — and is disabled (404) whenever `NODE_ENV=production`.
+
+### Local URL and mount point
+
+* Local development: **http://localhost:3000/**, `NEXT_PUBLIC_BASE_PATH` unset.
+  (For a different port: `npm run dev -- -p 3100`.)
+* Company deployment: built with `NEXT_PUBLIC_BASE_PATH=/client-trial/smc-task-management`,
+  served under that prefix. A browser tab left open on the prefixed URL will
+  request `/client-trial/…/_next/static/…` from a root-mounted dev server and
+  get a 404 — reload at the root URL, or hard-refresh, rather than changing
+  `basePath`.
+
+---
+
+## 16b. Database Index Migration (one-off, required)
+
+The performance indexes added in `prisma/schema.prisma` exist in the schema but
+must also be created on any database that was provisioned before them. They are
+index-only: no table, column, type, constraint or row is changed, and they can be
+applied to a live database.
+
+```bash
+# Preferred — builds concurrently, so the tables stay readable and writable.
+psql "$DATABASE_URL" -f prisma/sql/performance-indexes.sql
+
+# Alternative — Prisma creates them from schema.prisma instead.
+npx prisma db push
+```
+
+Verify afterwards:
+
+```sql
+SELECT tablename, indexname FROM pg_indexes
+WHERE schemaname = 'public' AND indexname LIKE '%_idx' ORDER BY 1, 2;
+```
+
+---
+
 ## 17. Known Limitations
 
 * **Offline Capability:** The app currently requires an active internet connection to save subtask progress. No IndexedDB/ServiceWorker offline queueing is currently implemented.
@@ -387,4 +494,3 @@ RESEND_API_KEY="re_123456789"
 * **Geo-Fencing:** Require executives to capture GPS coordinates proving physical presence at the client site before allowing visit closure.
 * **Photo Attachments:** S3/Blob storage integration to allow photo evidence upload for subtask completion.
 
-check deployment

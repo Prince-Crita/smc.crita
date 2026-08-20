@@ -7,6 +7,7 @@ import BottomNav from "@/components/layout/BottomNav";
 import AdminBottomNav from "@/components/layout/AdminBottomNav";
 import { Toaster } from "react-hot-toast";
 import Image from "next/image";
+import { assetPath } from "@/lib/utils/asset-path";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = await cookies();
@@ -41,7 +42,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               {/* Mobile: show company logo instead of plain text — same for Admin & Executive */}
               <div className="sm:hidden">
                 <Image
-                  src="/logo.png"
+                  src={assetPath("/logo.png")}
                   alt="Shaabi Management Consultancy"
                   width={600}
                   height={200}

@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import toast from "react-hot-toast";
 import Image from "next/image";
+import { assetPath } from "@/lib/utils/asset-path";
 import { Eye, EyeOff, Lock, User, X, Plus } from "lucide-react";
 import { loginSchema, LoginInput } from "@/lib/validations/auth";
 import {
@@ -177,7 +178,7 @@ export default function LoginForm() {
           {/* Logo - soft white container behind it for contrast against the navy panel (desktop only) */}
           <div className="inline-flex bg-white rounded-2xl shadow-sm px-6 py-4 mx-auto mb-8">
             <Image
-              src="/logo.png"
+              src={assetPath("/logo.png")}
               alt="Shaabi Management Consultancy"
               width={600}
               height={200}
@@ -211,7 +212,7 @@ export default function LoginForm() {
           <div className="lg:hidden text-center mb-8">
             <div className="flex justify-center mx-auto mb-4">
               <Image
-                src="/logo.png"
+                src={assetPath("/logo.png")}
                 alt="Shaabi Management Consultancy"
                 width={600}
                 height={200}

@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils/utils";
 import { ReassignVisitModal } from "@/components/admin/ReassignVisitModal";
 import { SkeletonCard, SkeletonTable } from "@/components/ui/Skeleton";
 import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
+import { useIsDesktop } from "@/lib/hooks/useIsDesktop";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -237,6 +238,9 @@ const TableRow = memo(function TableRow({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+/** Shared empty array — see the note where it is used below. */
+const NO_VISITS: Visit[] = [];
+
 export default function AdminVisitsPage() {
   const router = useRouter();
   const [searchTerm, setSearchTerm] = useState("");
@@ -264,9 +268,16 @@ export default function AdminVisitsPage() {
     };
   }, [clientFilter, executiveFilter, statusFilter]);
 
+  // Only the layout on screen is built: this list used to render every visit
+  // TWICE — once as a desktop table row and once as a mobile card — with CSS
+  // hiding whichever one did not belong.
+  const isDesktop = useIsDesktop();
+
   // Fetch once on mount / filter change; refreshed only by explicit mutations. No polling.
   const { data: visitsData, loading: isLoading, error, refresh: refreshVisits } = useLiveQuery(fetchVisits);
-  const visits = visitsData?.visits ?? [];
+  // Stable identity for the empty case — `?? []` returned a new array each
+  // render and defeated the useMemo that filters this list.
+  const visits = visitsData?.visits ?? NO_VISITS;
   const filterData = visitsData?.filterData ?? null;
 
   useEffect(() => {
@@ -393,12 +404,16 @@ export default function AdminVisitsPage() {
       {/* ── Content ── */}
       {isLoading ? (
         <>
-          <div className="md:hidden space-y-3">
-            {[...Array(4)].map((_, i) => <SkeletonCard key={i} />)}
-          </div>
-          <div className="hidden md:block">
-            <SkeletonTable rows={6} />
-          </div>
+          {!isDesktop && (
+            <div className="md:hidden space-y-3">
+              {[...Array(4)].map((_, i) => <SkeletonCard key={i} />)}
+            </div>
+          )}
+          {isDesktop && (
+            <div className="hidden md:block">
+              <SkeletonTable rows={6} />
+            </div>
+          )}
         </>
       ) : filteredVisits.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 bg-white border border-[#e2e7f0] rounded-xl text-center">
@@ -413,6 +428,7 @@ export default function AdminVisitsPage() {
       ) : (
         <>
           {/* Mobile cards */}
+          {!isDesktop && (
           <div className="md:hidden space-y-3">
             {filteredVisits.map((visit) => (
               <MobileVisitCard
@@ -423,8 +439,10 @@ export default function AdminVisitsPage() {
               />
             ))}
           </div>
+          )}
 
           {/* Desktop table */}
+          {isDesktop && (
           <div className="hidden md:block bg-white border border-[#e2e7f0] rounded-xl overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -450,6 +468,7 @@ export default function AdminVisitsPage() {
               </table>
             </div>
           </div>
+          )}
         </>
       )}
 

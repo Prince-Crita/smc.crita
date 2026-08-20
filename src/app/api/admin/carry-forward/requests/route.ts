@@ -64,7 +64,12 @@ export async function GET(request: NextRequest) {
           },
         },
       },
-      orderBy: { carryForwardRequestedAt: "asc" },
+      // `id` breaks ties: these rows are written in batches (a visit's
+      // subtasks are scaffolded together, and carry-forward requests are
+      // flagged in a single updateMany), so many share an identical
+      // timestamp. Without a tiebreaker Postgres may return them in a
+      // different order on each request and the list reshuffles itself.
+      orderBy: [{ carryForwardRequestedAt: "asc" }, { id: "asc" }],
     });
 
     // §6 — a task is only awaiting approval once its visit's LAST WORKING DAY

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { isAdminRole } from "@/lib/auth/roles";
-import { getSubtaskTotals } from "@/lib/utils/visit-status";
+import { getVisitSubtaskCounts, totalsForVisit } from "@/lib/utils/visit-aggregates";
 import { runCarryForwardMaintenance, isCarryForwardVisit } from "@/lib/utils/carry-forward";
 import { toMidnightIST } from "@/lib/utils/attendance";
 
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     const todayStart = toMidnightIST(now);
     const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
 
-    const [allVisits, todayLeaveCount] = await Promise.all([
+    const [allVisits, todayLeaveCount, counts, mdMeetingNoTasks] = await Promise.all([
       prisma.visit.findMany({
         select: {
           id:            true,
@@ -42,13 +42,6 @@ export async function GET(request: NextRequest) {
           notes:         true,
           client:    { select: { id: true, name: true, code: true } },
           executive: { select: { id: true, name: true, email: true } },
-          tasks: {
-            select: {
-              taskType: true,
-              mdMeetingAnswer: true,
-              subtasks: { select: { isCompleted: true, isCarriedForward: true } },
-            },
-          },
         },
         orderBy: { updatedAt: "desc" },
       }),
@@ -59,7 +52,19 @@ export async function GET(request: NextRequest) {
       prisma.leaveRequest.count({
         where: { status: "PENDING", createdAt: { gte: todayStart, lt: todayEnd } },
       }),
+      // Per-visit subtask counts, aggregated in the database instead of
+      // materialising every subtask row of every visit (visit-aggregates.ts).
+      getVisitSubtaskCounts(),
+      // The only task-level fact this endpoint needs: which visits answered
+      // "NO" to the MD meeting. A handful of rows, instead of the whole task
+      // table travelling along with the subtasks.
+      prisma.task.findMany({
+        where: { taskType: "MD_MEETING", mdMeetingAnswer: "NO" },
+        select: { visitId: true },
+      }),
     ]);
+
+    const mdMeetingNoVisitIds = new Set(mdMeetingNoTasks.map((t) => t.visitId));
 
     let totalCarryForward = 0;
     // Reuses the exact "[Rescheduled:" marker convention written by
@@ -68,9 +73,9 @@ export async function GET(request: NextRequest) {
     // Visits closed with MD Meeting = NO (admin must be notified - P6)
     let mdMeetingNoCount = 0;
 
-    const withProgress = allVisits.map((v: any) => {
+    const withProgress = allVisits.map((v) => {
       const { totalSubtasks, completedSubtasks, carryForwardCount, progress, displayStatus } =
-        getSubtaskTotals(v.tasks, v.status);
+        totalsForVisit(counts, v.id, v.status);
 
       // Carry-forward can originate from subtask-level carries (Business
       // Rule 1) OR an auto-created "missed weekly visit" (Business Rule 2,
@@ -85,9 +90,7 @@ export async function GET(request: NextRequest) {
       }
 
       // Closed without the MD meeting having been held
-      const mdMeetingNo =
-        v.status === "CLOSED" &&
-        v.tasks.some((t: any) => t.taskType === "MD_MEETING" && t.mdMeetingAnswer === "NO");
+      const mdMeetingNo = v.status === "CLOSED" && mdMeetingNoVisitIds.has(v.id);
       if (mdMeetingNo) mdMeetingNoCount += 1;
 
       // Overdue = scheduled date is past today AND visit is not closed
@@ -128,7 +131,10 @@ export async function GET(request: NextRequest) {
     const pendingVisits    = withProgress.filter((v) => v.displayStatus === "PENDING");
     const inProgressVisits = withProgress.filter((v) => v.displayStatus === "IN_PROGRESS");
     const closedVisits     = withProgress.filter((v) => v.displayStatus === "CLOSED");
-    const overdueVisits    = withProgress.filter((v) => v.isOverdue);
+    // Counted, not returned: the three arrays above already partition every
+    // visit, so an `overdueVisits` array was a fourth, redundant copy of rows
+    // the dashboard never read — roughly a third of this response's size.
+    const overdueCount     = withProgress.reduce((n, v) => n + (v.isOverdue ? 1 : 0), 0);
 
     // ── TODAY-ONLY counters (drive the "Today's Alerts" panel) ────────────
     // SINGLE BASIS: `isToday`, i.e. the visit's SCHEDULED window overlaps
@@ -164,7 +170,7 @@ export async function GET(request: NextRequest) {
         pendingCount:      pendingVisits.length,
         inProgressCount:   inProgressVisits.length,
         closedCount:       closedVisits.length,
-        missedCount:       overdueVisits.length,
+        missedCount:       overdueCount,
         carryForwardCount: totalCarryForward,
         rescheduledCount,
         mdMeetingNoCount,
@@ -176,7 +182,6 @@ export async function GET(request: NextRequest) {
       pendingVisits,
       inProgressVisits,
       closedVisits,
-      overdueVisits,
     });
   } catch (error) {
     console.error("Admin stats error:", error);

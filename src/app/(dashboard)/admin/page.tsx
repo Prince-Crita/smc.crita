@@ -14,6 +14,7 @@ import { SkeletonStat, SkeletonCard, SkeletonTable } from "@/components/ui/Skele
 import { ExecutiveDetailModal } from "@/components/admin/ExecutiveDetailModal";
 import { formatDate, cn } from "@/lib/utils/utils";
 import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
+import { useIsDesktop } from "@/lib/hooks/useIsDesktop";
 
 // ─── Recharts — dynamically imported to avoid SSR issues ─────────────────────
 import { Cell } from "recharts";
@@ -68,7 +69,8 @@ interface Stats {
   pendingVisits: VisitItem[];
   inProgressVisits: VisitItem[];
   closedVisits: VisitItem[];
-  overdueVisits: VisitItem[];
+  // No `overdueVisits`: those visits are already in the three arrays above,
+  // and the count lives in summary.missedCount / today.missedCount.
 }
 
 interface Executive {
@@ -262,6 +264,9 @@ function DonutLegend({ items }: { items: { label: string; value: number; color: 
   );
 }
 
+/** Shared empty array — see the note where it is used below. */
+const NO_EXECUTIVES: Executive[] = [];
+
 export default function AdminDashboard() {
   const [activeTab, setActiveTab]       = useState<ActiveTab>("all");
   const [selectedExecId, setSelectedExecId] = useState<string | null>(null);
@@ -283,7 +288,10 @@ export default function AdminDashboard() {
   // Fetch on mount, on focus/visibility (see useLiveQuery), and after mutations.
   const { data: dashboardData, loading, refresh: fetchData } = useLiveQuery(fetchDashboardData);
   const stats = dashboardData?.stats ?? null;
-  const executives = dashboardData?.executives ?? [];
+  // Stable identity for the empty case. `?? []` built a NEW array on every
+  // render, so every useMemo below that depends on `executives` recomputed
+  // every time — the memoisation was silently doing nothing.
+  const executives = dashboardData?.executives ?? NO_EXECUTIVES;
 
   // Every visit, in a single stable order. The three arrays returned by
   // /api/admin/stats partition ALL visits by displayStatus (PENDING /
@@ -316,6 +324,11 @@ export default function AdminDashboard() {
   ], [stats]);
 
   const handleSelectExec = useCallback((id: string) => setSelectedExecId(id), []);
+
+  // Only the layout actually on screen is built. Both halves of this page —
+  // including two separate sets of charts and the full visit list twice —
+  // used to be rendered on every device and merely hidden by CSS.
+  const isDesktop = useIsDesktop();
 
   const barData = useMemo(() =>
     executives.slice(0, 8).map((e) => ({
@@ -387,6 +400,7 @@ export default function AdminDashboard() {
         onClose={() => setSelectedExecId(null)}
       />
 
+      {isDesktop && (
       <div className="hidden md:block space-y-6">
 
         <div className="flex items-center justify-between gap-4">
@@ -782,6 +796,9 @@ export default function AdminDashboard() {
         </div>
       </div>
 
+      )}
+
+      {!isDesktop && (
       <div className="md:hidden space-y-5">
 
         <div className="flex items-center justify-between">
@@ -1007,6 +1024,7 @@ export default function AdminDashboard() {
         </div>
 
       </div>
+      )}
     </div>
   );
 }

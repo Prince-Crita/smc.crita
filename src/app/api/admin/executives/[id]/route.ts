@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { isAdminRole } from "@/lib/auth/roles";
-import { getSubtaskTotals } from "@/lib/utils/visit-status";
+import { getVisitSubtaskCounts, totalsForVisit } from "@/lib/utils/visit-aggregates";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getAuthUser(request);
@@ -11,28 +11,52 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
 
   try {
+    // Only the fields the Executive Profile modal renders. This used to
+    // `include` every assigned visit with all of its tasks and subtasks, and
+    // then spread the whole lot into the response ALONGSIDE the trimmed
+    // `visits` array below — the same visit tree serialised twice, with the
+    // full subtask rows, for a modal that shows a row per visit.
     const exec = await prisma.user.findUnique({
       where: { id, role: "EXECUTIVE" },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        phone: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
         assignedVisits: {
-          include: {
+          select: {
+            id: true,
+            visitNumber: true,
+            status: true,
+            scheduledDate: true,
+            closedAt: true,
             client: { select: { id: true, name: true, code: true } },
-            tasks: { include: { subtasks: { select: { isCompleted: true, isCarriedForward: true } } } },
           },
           orderBy: { scheduledDate: "desc" },
         },
-        activityLogs: { orderBy: { createdAt: "desc" }, take: 20 },
-        assignedClients: { select: { id: true, name: true } },
+        // `id` breaks ties: several logs are written in the same millisecond
+        // (closing a visit writes VISIT_CLOSED and SUMMARY_GENERATED together),
+        // and without a tiebreaker Postgres is free to return them in a
+        // different order each time, so the modal's activity list reshuffled
+        // itself between refreshes.
+        activityLogs: { orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 20 },
       },
     });
 
     if (!exec) return NextResponse.json({ error: "Executive not found" }, { status: 404 });
 
+    // Progress/carry-forward counted in the database, one row per visit.
+    const counts = await getVisitSubtaskCounts(exec.assignedVisits.map((v) => v.id));
+
     // Status via the shared helper so this modal agrees with the dashboard,
     // visit list and calendar (it previously derived status from subtask
     // progress alone, ignoring visit.status).
-    const visits = exec.assignedVisits.map((v: any) => {
-      const { carryForwardCount, progress, displayStatus } = getSubtaskTotals(v.tasks, v.status);
+    const visits = exec.assignedVisits.map((v) => {
+      const { carryForwardCount, progress, displayStatus } = totalsForVisit(counts, v.id, v.status);
       return {
         id: v.id,
         visitNumber: v.visitNumber,
@@ -48,7 +72,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     const uniqueClients = Array.from(new Map(visits.map((v) => [v.client.id, v.client])).values());
 
-    const { passwordHash: _, ...safeExec } = exec;
+    // `assignedVisits` is deliberately NOT spread into the response: `visits`
+    // below is the trimmed view of exactly the same rows, and it is the only
+    // one the modal reads.
+    const { assignedVisits: _assignedVisits, ...safeExec } = exec;
     return NextResponse.json({
       executive: {
         ...safeExec,

@@ -66,7 +66,10 @@ export async function GET(request: NextRequest) {
             },
           },
         },
-        orderBy: { createdAt: "desc" },
+        // `id` breaks ties: a visit's subtasks are all created in one batch
+        // and share a createdAt, so without it this list reshuffled between
+        // requests.
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       }),
 
       prisma.activityLog.findMany({

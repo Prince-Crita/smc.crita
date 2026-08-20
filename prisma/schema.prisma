@@ -275,6 +275,21 @@ model Visit {
   delegations   VisitDelegation[]
   assignments   VisitAssignment[]
 
+  // ─── Indexes ───────────────────────────────────────────────────────────────
+  // PostgreSQL does NOT create an index for a foreign key, so every lookup
+  // below was a sequential scan of the whole table:
+  //   clientId      client detail + visit history, carry-forward grouping
+  //   executiveId   the executive's own lists, the admin's per-executive views
+  //   scheduledDate the calendar's week window and every date-ordered list
+  //   status        the carry-forward due sweep (status IN (OPEN, CLOSED))
+  //   updatedAt     the admin dashboard's ordering of every visit
+  // Indexes only; no column, type or relation changes — existing rows and
+  // queries behave exactly as before, just without the scans.
+  @@index([clientId])
+  @@index([executiveId])
+  @@index([scheduledDate])
+  @@index([status])
+  @@index([updatedAt])
   @@map("visits")
 }
 
@@ -356,6 +371,13 @@ model Subtask {
   // NULL sourceSubtaskId (normal subtasks) is unaffected - Postgres treats
   // NULLs as distinct in unique indexes.
   @@unique([taskId, sourceSubtaskId])
+  // Carry-forward screens filter on these two columns across the whole
+  // subtask table (the largest table in the schema).
+  @@index([isCarriedForward])
+  @@index([carryForwardRequestedAt])
+  // Clearing carry-forward provenance when a visit is deleted looks rows up
+  // by this pointer; without an index that is a full scan of every subtask.
+  @@index([sourceSubtaskId])
   @@map("subtasks")
 }
 
@@ -371,6 +393,9 @@ model SubtaskTemplate {
 
   client     Client?  @relation("ClientSubtaskTemplates", fields: [clientId], references: [id], onDelete: Cascade)
 
+  // Resolving a client's task plan reads templates by client (and by task
+  // type within it) every time a visit is created.
+  @@index([clientId, taskType])
   @@map("subtask_templates")
 }
 
@@ -388,6 +413,7 @@ model VisitReassignment {
   toExecutive   User  @relation("ReassignTo", fields: [toExecutiveId], references: [id])
   reassignedBy  User  @relation("ReassignedBy", fields: [reassignedById], references: [id])
 
+  @@index([visitId])
   @@map("visit_reassignments")
 }
 
@@ -402,6 +428,13 @@ model ActivityLog {
   visit Visit? @relation(fields: [visitId], references: [id])
   user  User   @relation(fields: [userId], references: [id])
 
+  // The activity table grows fastest of all and had no index at all:
+  //   visitId            a visit's own history, and its cleanup on delete
+  //   (userId, createdAt) an executive's recent activity feed
+  //   (action, createdAt) the carry-forward activity list
+  @@index([visitId])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
   @@map("activity_logs")
 }
 
@@ -425,5 +458,8 @@ model VisitDelegation {
   fromExecutive User  @relation("DelegationFrom", fields: [fromExecutiveId], references: [id])
   toExecutive   User  @relation("DelegationTo",   fields: [toExecutiveId],   references: [id])
 
+  @@index([visitId])
+  // "Delegations waiting for me" — the executive's incoming-requests poll.
+  @@index([toExecutiveId, status])
   @@map("visit_delegations")
 }

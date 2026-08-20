@@ -39,3 +39,18 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# ─── Never commit ────────────────────────────────────────────────────────────
+# Self-contained server build for the company deployment: a full copy of the
+# app plus its node_modules (~110 MB), produced by the standalone build.
+/smc-task-management-standalone/
+
+# Database dumps. These contain real client data and, depending on how they
+# were produced, connection details — they belong in secure backup storage,
+# never in the repository.
+*.sql
+!prisma/sql/*.sql
+
+# Local scratch/diagnostic output.
+/.diag/
+/.tmp-work/

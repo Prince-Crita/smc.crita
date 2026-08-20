@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/db/prisma";
-import { getSubtaskTotals, sortVisitsForDisplay } from "@/lib/utils/visit-status";
+import { sortVisitsForDisplay } from "@/lib/utils/visit-status";
+import { getVisitSubtaskCounts, totalsForVisit } from "@/lib/utils/visit-aggregates";
 import { isCarryForwardVisit } from "@/lib/utils/carry-forward";
 import { executiveVisitScope } from "@/lib/utils/visit-access";
 
@@ -47,22 +48,20 @@ export async function GET(request: NextRequest) {
         assignments: {
           select: { executiveId: true, role: true, executive: { select: { name: true } } },
         },
-        tasks: {
-          select: {
-            subtasks: {
-              // Only the boolean fields we need - no IDs or text
-              select: { isCompleted: true, isCarriedForward: true },
-            },
-          },
-        },
       },
       orderBy: { scheduledDate: "desc" },
     });
 
+    // Per-visit subtask counts from one aggregate query. This list used to
+    // carry every subtask row of every visit both out of the database AND on
+    // into the JSON response (the `...visit` spread below included the whole
+    // `tasks` tree), which no screen ever read.
+    const counts = await getVisitSubtaskCounts(visits.map((v) => v.id));
+
     // Compute progress-based displayStatus using shared utility
     const visitsWithProgress = visits.map((visit) => {
       const { totalSubtasks, completedSubtasks, carryForwardCount, progress, displayStatus } =
-        getSubtaskTotals(visit.tasks, visit.status);
+        totalsForVisit(counts, visit.id, visit.status);
       // Carry-forward can originate from subtask-level carries (Business
       // Rule 1) OR an auto-created "missed weekly visit" (Business Rule 2,
       // flagged via the notes marker) — shared helper, single source of truth.

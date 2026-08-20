@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/db/prisma";
-import { getSubtaskTotals } from "@/lib/utils/visit-status";
+import { getVisitSubtaskCounts, totalsForVisit } from "@/lib/utils/visit-aggregates";
 import { runCarryForwardMaintenance, isCarryForwardVisit } from "@/lib/utils/carry-forward";
 import { executiveVisitScope } from "@/lib/utils/visit-access";
 
@@ -59,19 +59,18 @@ export async function GET(request: NextRequest) {
         notes: true,
         client: { select: { name: true, code: true } },
         executive: { select: { id: true, name: true } },
-        tasks: {
-          select: {
-            subtasks: { select: { isCompleted: true, isCarriedForward: true } },
-          },
-        },
       },
       orderBy: { scheduledDate: "asc" },
     });
 
+    // Progress for this week's visits, counted in the database (one row per
+    // visit) rather than by loading each visit's whole subtask list.
+    const counts = await getVisitSubtaskCounts(visits.map((v) => v.id));
+
     // Enrich with progress + carry-forward flag
     const enriched = visits.map((v) => {
       const { totalSubtasks, completedSubtasks, carryForwardCount, progress, displayStatus } =
-        getSubtaskTotals(v.tasks, v.status);
+        totalsForVisit(counts, v.id, v.status);
       return {
         id: v.id,
         visitNumber: v.visitNumber,

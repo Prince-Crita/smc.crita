@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { isAdminRole } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/prisma";
-import { getSubtaskTotals, sortVisitsForDisplay } from "@/lib/utils/visit-status";
+import { sortVisitsForDisplay } from "@/lib/utils/visit-status";
+import { getVisitSubtaskCounts, totalsForVisit } from "@/lib/utils/visit-aggregates";
 import { getApprovedLeave } from "@/lib/utils/leave-check";
 import { isCarryForwardVisit } from "@/lib/utils/carry-forward";
 import { resolveClientTaskPlan, createTasksWithSubtasks } from "@/lib/utils/create-visit";
@@ -48,6 +49,9 @@ export async function GET(request: NextRequest) {
     if (executiveId) where.executiveId = executiveId;
     // Do NOT apply status filter to DB query - DB status != display status
 
+    // Subtask progress comes from a per-visit COUNT in the database, not from
+    // loading every subtask row (see lib/utils/visit-aggregates.ts). The three
+    // reads below are independent, so they still run in parallel.
     const [allVisits, clients, executives] = await Promise.all([
       prisma.visit.findMany({
         where,
@@ -62,14 +66,6 @@ export async function GET(request: NextRequest) {
           notes:          true,
           client:    { select: { id: true, name: true, code: true } },
           executive: { select: { id: true, name: true } },
-          tasks: {
-            select: {
-              subtasks: {
-                // Only the two boolean fields needed for progress calculation
-                select: { isCompleted: true, isCarriedForward: true },
-              },
-            },
-          },
         },
         orderBy: { scheduledDate: "desc" },
       }),
@@ -84,10 +80,17 @@ export async function GET(request: NextRequest) {
       }),
     ]);
 
+    // Scoped to exactly the visits just fetched when a filter is applied; the
+    // unfiltered admin list groups over every visit in one pass instead of
+    // sending several thousand ids back as a query parameter.
+    const counts = await getVisitSubtaskCounts(
+      clientId || executiveId ? allVisits.map((v) => v.id) : undefined
+    );
+
     // Compute progress-based displayStatus for every visit using shared utility
-    const visitsWithProgress = allVisits.map((visit: any) => {
+    const visitsWithProgress = allVisits.map((visit) => {
       const { totalSubtasks, completedSubtasks, carryForwardCount, progress, displayStatus } =
-        getSubtaskTotals(visit.tasks, visit.status);
+        totalsForVisit(counts, visit.id, visit.status);
       // Carry-forward can originate from subtask-level carries (Business
       // Rule 1) OR an auto-created "missed weekly visit" (Business Rule 2,
       // flagged via the notes marker) — shared helper, single source of truth.
@@ -110,7 +113,7 @@ export async function GET(request: NextRequest) {
     // closed most-recent-first.
     const visits = sortVisitsForDisplay(
       displayStatusFilter
-        ? visitsWithProgress.filter((v: any) => v.displayStatus === displayStatusFilter)
+        ? visitsWithProgress.filter((v) => v.displayStatus === displayStatusFilter)
         : visitsWithProgress
     );
 
