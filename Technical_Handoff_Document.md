@@ -480,6 +480,30 @@ WHERE schemaname = 'public' AND indexname LIKE '%_idx' ORDER BY 1, 2;
 
 ---
 
+## 16c. Deployment region must match the database region
+
+`vercel.json` pins the serverless functions to **`sin1` (Singapore)** because the
+Neon database lives in **`ap-southeast-1` (Singapore)**.
+
+This is not a preference — it is the single largest factor in how fast the app
+feels. Every API route makes several *sequential* database round-trips, and a
+round-trip costs whatever the physical distance costs:
+
+| Functions in | Distance to database | Measured effect |
+|---|---|---|
+| `iad1` (Washington DC) | ~15,000 km | simplest endpoint 544 ms; admin visit list 1.3 s |
+| `sin1` (Singapore) | same region | round-trip is local; users in India are also ~4× closer |
+
+For reference, the same database answers a `SELECT 1` in **59 ms** from India and
+runs the per-visit subtask aggregate in **76 ms**, so the query work itself is
+tens of milliseconds — the rest was distance.
+
+**If the database is ever moved to another region, move this with it.** Note that
+`vercel.json` is strict JSON validated against Vercel's schema: it accepts no
+comments and no extra keys (a `"//regions"` note key fails the build outright).
+
+---
+
 ## 17. Known Limitations
 
 * **Offline Capability:** The app currently requires an active internet connection to save subtask progress. No IndexedDB/ServiceWorker offline queueing is currently implemented.
