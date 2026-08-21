@@ -231,42 +231,50 @@ export async function POST(request: NextRequest) {
     }, 0);
     const visitNumber = `V${String(highest + 1).padStart(4, "0")}`;
 
-    const visit = await prisma.visit.create({
-      data: {
-        visitNumber,
-        clientId,
-        executiveId: team.leadId,
-        visitType: team.visitType,
-        scheduledDate: scheduledAt,
-        endDate: endAt,
-        notes: notes?.trim() || null,
-        status: "PENDING",
-        // Team rows are created alongside the visit so a TEAM visit is never
-        // briefly visible without its members.
-        ...(team.visitType === "TEAM" && {
-          assignments: {
-            create: [
-              { executiveId: team.leadId, role: "LEAD" as const },
-              ...team.memberIds.map((id) => ({ executiveId: id, role: "MEMBER" as const })),
-            ],
-          },
-        }),
-      },
-      include: {
-        client: { select: { name: true, code: true } },
-        executive: { select: { name: true, email: true } },
-        assignments: { select: { executiveId: true, role: true, executive: { select: { name: true } } } },
-      },
-    });
-
     // Repeated-client auto population: scaffold the client's CURRENT task
     // configuration (main tasks + subtasks, client-specific > global) so the
-    // admin never has to recreate tasks for a returning client. Previously
-    // this route created a visit with ZERO tasks. Any due carry-forward from
-    // the client's earlier visits flows into this visit automatically via
-    // the carry-forward sweep (same-client only).
+    // admin never has to recreate tasks for a returning client. Resolved
+    // BEFORE the transaction — it only reads the client's configuration and
+    // does not depend on the visit — so the transaction stays short.
     const plan = await resolveClientTaskPlan(clientId);
-    await createTasksWithSubtasks(visit.id, plan);
+
+    // Visit, team rows and the configured task structure are committed
+    // TOGETHER. Previously the tasks were written after the visit had already
+    // been committed, so a failure there left a visit — with its team already
+    // assigned — holding no tasks at all, which is exactly what an executive
+    // sees as "the visit is there but the client's tasks are missing".
+    const visit = await prisma.$transaction(async (tx) => {
+      const created = await tx.visit.create({
+        data: {
+          visitNumber,
+          clientId,
+          executiveId: team.leadId,
+          visitType: team.visitType,
+          scheduledDate: scheduledAt,
+          endDate: endAt,
+          notes: notes?.trim() || null,
+          status: "PENDING",
+          // Team rows are created alongside the visit so a TEAM visit is never
+          // briefly visible without its members.
+          ...(team.visitType === "TEAM" && {
+            assignments: {
+              create: [
+                { executiveId: team.leadId, role: "LEAD" as const },
+                ...team.memberIds.map((id) => ({ executiveId: id, role: "MEMBER" as const })),
+              ],
+            },
+          }),
+        },
+        include: {
+          client: { select: { name: true, code: true } },
+          executive: { select: { name: true, email: true } },
+          assignments: { select: { executiveId: true, role: true, executive: { select: { name: true } } } },
+        },
+      });
+
+      await createTasksWithSubtasks(created.id, plan, tx);
+      return created;
+    });
 
     await prisma.activityLog.create({
       data: {

@@ -4,6 +4,7 @@ import {
   createVisitForClient,
   CARRY_FORWARD_SUBTASKS_ONLY_MARKER,
   isSubtaskOnlyCarryForwardVisit,
+  ensureCarryForwardVisitHasClientTasks,
 } from "@/lib/utils/create-visit";
 import { toMidnightIST } from "@/lib/utils/attendance";
 import { applyAssignment, NormalizedAssignment } from "@/lib/utils/visit-assignment";
@@ -325,6 +326,14 @@ export async function executeCarryForward(
       }
     }
   }
+
+  // The carried subtasks are in place. If this is a carry-forward-only visit
+  // that stands in for the client's visit that week, it also has to carry the
+  // client's configured main tasks and subtasks — otherwise the executive is
+  // sent to the client with only the missed items and none of the ordinary
+  // checklist. Additive, and a no-op for a visit that was reused rather than
+  // created (that one already has its normal task list).
+  await ensureCarryForwardVisitHasClientTasks(nextVisit.id);
 
   // Log carry-forward activity
   await prisma.activityLog.create({
@@ -822,6 +831,12 @@ export async function approveCarryForward(
         }
       }
 
+      // Same rule as executeCarryForward: an approved carry-forward that had
+      // to create its own visit must still carry the client's configured work
+      // when that visit is the client's only one for the week. No-op when an
+      // existing visit was reused.
+      await ensureCarryForwardVisitHasClientTasks(destination.id);
+
       result.destinations.push({
         visitId: destination.id,
         visitNumber: destination.visitNumber,
@@ -977,6 +992,11 @@ export async function moveCarryForward(
         await prisma.subtask.update({ where: { id: item.id }, data: { taskId: target.id } });
         result.moved++;
       }
+
+      // Same rule again: a destination visit created for this reschedule must
+      // carry the client's configured work when it is their only visit that
+      // week. No-op when an existing visit was taken over.
+      await ensureCarryForwardVisitHasClientTasks(destination.id);
 
       result.destinations.push({ visitId: destination.id, visitNumber: destination.visitNumber, created: createdVisit });
 

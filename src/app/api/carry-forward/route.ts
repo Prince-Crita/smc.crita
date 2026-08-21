@@ -7,6 +7,7 @@ import { CARRY_FORWARD_NOTE_PREFIX } from "@/lib/utils/carry-forward";
 import {
   CARRY_FORWARD_SUBTASKS_ONLY_MARKER,
   createVisitForClient,
+  ensureCarryForwardVisitHasClientTasks,
   isSubtaskOnlyCarryForwardVisit,
 } from "@/lib/utils/create-visit";
 
@@ -324,6 +325,11 @@ export async function PATCH(request: NextRequest) {
     await prisma.subtask.update({ where: { id: subtask.id }, data: { taskId: movedTask.id } });
     // The holder this item just left may now be empty — never leave the shell.
     await discardEmptiedCarryForwardHolder(visit.id);
+    // If discarding it left this new visit as the client's only one for the
+    // week, it is no longer a supplement to a real visit — it IS the client's
+    // visit, so it needs their configured tasks too. Declines by itself while
+    // another visit still covers that week, which is the normal case here.
+    await ensureCarryForwardVisitHasClientTasks(newVisitId);
     const created = await prisma.visit.findUnique({
       where: { id: newVisitId },
       select: { id: true, visitNumber: true, scheduledDate: true },

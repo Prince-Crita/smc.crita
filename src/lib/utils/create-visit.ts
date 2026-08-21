@@ -8,10 +8,11 @@
  * Visit number format: SMC-{CLIENT_CODE}-{YYYYMM}-{NNN}
  * e.g. SMC-CLIFF-202506-001
  *
- * IMPORTANT: Does NOT use prisma.$transaction(callback) because the PrismaPg
- * driver adapter (wrapping pg.Pool) can have compatibility issues with
- * interactive transactions. Uses plain sequential awaited writes instead,
- * which are fully supported by all Prisma Driver Adapters.
+ * The Visit row and its configured Tasks/Subtasks are written in ONE
+ * transaction: a visit must never be committed without the task structure its
+ * client's configuration calls for, because an executive then opens it and
+ * finds nothing to do. Activity logging stays outside — a logging failure
+ * must not roll back a visit that was created correctly.
  *
  * Task population order:
  *   1. Client-specific SubtaskTemplates (clientId = this client) — override global
@@ -20,7 +21,11 @@
  *   4. Any additional custom task types that have client-specific templates are also created
  */
 
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+
+/** The base client or a transaction client — both expose the models used here. */
+type TaskScaffoldDb = PrismaClient | Prisma.TransactionClient;
 
 // ─── Rule 2 marker: subtask-only carry-forward visit ───────────────────────
 // Distinguishes the TWO carry-forward rules, which must stay independent:
@@ -43,11 +48,177 @@ import { prisma } from "@/lib/db/prisma";
 export const CARRY_FORWARD_SUBTASKS_ONLY_MARKER = "[CF-SUBTASKS-ONLY]";
 
 /**
- * True for a Rule-2 visit: it must contain ONLY carried subtasks and must
- * never be back-filled with the client's task configuration.
+ * True for a Rule-2 visit: its task list must never be REBUILT from the
+ * client's configuration (see syncClientPendingVisits), because replacing or
+ * removing its tasks is exactly what would defeat subtask-level carry-forward.
+ *
+ * It does NOT mean the visit may never receive the client's configured work —
+ * see ensureCarryForwardVisitHasClientTasks below for when it must.
  */
 export function isSubtaskOnlyCarryForwardVisit(visit: { notes: string | null }): boolean {
   return !!visit.notes && visit.notes.includes(CARRY_FORWARD_SUBTASKS_ONLY_MARKER);
+}
+
+// ─── A carry-forward visit that stands in for the client's weekly visit ────
+//
+// A carry-forward-only visit is created ONLY when the client has nothing
+// scheduled on the target day (executeCarryForward reuses the real visit
+// whenever one exists, so the carried items sit alongside its normal task
+// list). Automatic weekly generation is disabled, so nothing else will ever
+// come along and create that client's visit for the week either.
+//
+// The result was a visit that looks like any other on the executive's list —
+// same client, same date, assignable to a solo executive or a whole team —
+// but that contains only the handful of subtasks carried over, with the
+// client's configured main tasks and subtasks missing entirely. If the
+// carried items were later completed, rejected or removed by an admin, the
+// visit was left as an empty shell with nothing to do at all.
+//
+// So: when a carry-forward-only visit is the client's ONLY visit that week it
+// is not a supplement to a real visit — it IS the client's visit, and the
+// executives sent to it must be given the client's configured work. When the
+// client does have another visit that week, the configured work lives there
+// and this one correctly stays a pure carry-forward container.
+//
+// Everything below is purely ADDITIVE. No carried subtask, no completed
+// subtask and no task is ever renamed, reordered, replaced or deleted by it.
+
+/**
+ * Title prefix a carried subtask wears so an executive can see where it came
+ * from. Matched here so a carried item and the template line it came from are
+ * recognised as the SAME checklist entry and scaffolding never stacks a
+ * duplicate twin on top of it.
+ */
+export const CARRY_FORWARD_TITLE_PREFIX = "[CARRY-FORWARD] ";
+
+const cleanSubtaskTitle = (title: string) =>
+  title.replace(CARRY_FORWARD_TITLE_PREFIX, "").trim().toLowerCase();
+
+/** Monday 00:00 UTC of the week containing `d` — the app's week boundary. */
+function mondayOfWeekUTC(d: Date): Date {
+  const monday = new Date(d);
+  const dow = monday.getUTCDay(); // 0 = Sunday
+  monday.setUTCDate(monday.getUTCDate() + (dow === 0 ? -6 : 1 - dow));
+  monday.setUTCHours(0, 0, 0, 0);
+  return monday;
+}
+
+/** True when the client has no OTHER visit in the same week as this one. */
+async function isClientsOnlyVisitInItsWeek(visit: {
+  id: string;
+  clientId: string;
+  scheduledDate: Date;
+}): Promise<boolean> {
+  const weekStart = mondayOfWeekUTC(visit.scheduledDate);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setUTCDate(weekEnd.getUTCDate() + 7);
+
+  const others = await prisma.visit.count({
+    where: {
+      clientId: visit.clientId,
+      id: { not: visit.id },
+      scheduledDate: { gte: weekStart, lt: weekEnd },
+    },
+  });
+  return others === 0;
+}
+
+export interface ScaffoldResult {
+  tasksAdded: number;
+  subtasksAdded: number;
+}
+
+const NOTHING_ADDED: ScaffoldResult = { tasksAdded: 0, subtasksAdded: 0 };
+
+/**
+ * Add the client's configured main tasks and template subtasks to an EXISTING
+ * visit, leaving everything already on it exactly as it is.
+ *
+ * A template subtask is skipped when its task already holds a subtask with the
+ * same title, with or without the carry-forward prefix, so a carried item
+ * never gains a duplicate twin. Tasks already present are left untouched —
+ * their title, order, subtasks and progress are not rewritten here.
+ *
+ * Constant number of queries regardless of how many tasks are added.
+ */
+export async function addMissingConfiguredTasks(visitId: string): Promise<ScaffoldResult> {
+  const visit = await prisma.visit.findUnique({
+    where: { id: visitId },
+    select: {
+      id: true,
+      clientId: true,
+      status: true,
+      tasks: { select: { id: true, taskType: true, subtasks: { select: { title: true } } } },
+    },
+  });
+  // Closed visits are completed history and keep the tasks they closed with.
+  if (!visit || visit.status === "CLOSED") return NOTHING_ADDED;
+
+  const plan = await resolveClientTaskPlan(visit.clientId);
+  if (plan.length === 0) return NOTHING_ADDED;
+
+  const existingTypes = new Set(visit.tasks.map((t) => t.taskType));
+  const missingTasks = plan.filter((entry) => !existingTypes.has(entry.type));
+
+  if (missingTasks.length > 0) {
+    await prisma.task.createMany({
+      data: missingTasks.map((entry) => ({
+        visitId,
+        taskType: entry.type,
+        title: entry.title,
+        status: "PENDING" as const,
+        orderIndex: entry.orderIndex,
+      })),
+    });
+  }
+
+  // Re-read only when new tasks were created — otherwise the ids and titles
+  // already loaded above are current.
+  const tasks = missingTasks.length
+    ? await prisma.task.findMany({
+        where: { visitId },
+        select: { id: true, taskType: true, subtasks: { select: { title: true } } },
+      })
+    : visit.tasks;
+  const taskByType = new Map(tasks.map((t) => [t.taskType, t]));
+
+  const subtaskRows: { taskId: string; title: string; isCompleted: boolean; isCarriedForward: boolean }[] = [];
+  for (const entry of plan) {
+    const task = taskByType.get(entry.type);
+    if (!task) continue;
+    const present = new Set(task.subtasks.map((s) => cleanSubtaskTitle(s.title)));
+    for (const title of entry.subtaskTitles) {
+      const key = cleanSubtaskTitle(title);
+      if (present.has(key)) continue; // already there (carried or scaffolded)
+      present.add(key);
+      subtaskRows.push({ taskId: task.id, title, isCompleted: false, isCarriedForward: false });
+    }
+  }
+
+  if (subtaskRows.length > 0) {
+    await prisma.subtask.createMany({ data: subtaskRows });
+  }
+
+  return { tasksAdded: missingTasks.length, subtasksAdded: subtaskRows.length };
+}
+
+/**
+ * Give a carry-forward-only visit the client's configured tasks, but ONLY when
+ * it is standing in for the client's visit that week (see the note above).
+ *
+ * Called by every flow that creates a carry-forward-only visit, after the
+ * carried subtasks have been placed on it — so the carried rows are already
+ * present and the title de-duplication above can see them.
+ */
+export async function ensureCarryForwardVisitHasClientTasks(visitId: string): Promise<ScaffoldResult> {
+  const visit = await prisma.visit.findUnique({
+    where: { id: visitId },
+    select: { id: true, clientId: true, scheduledDate: true, notes: true, status: true },
+  });
+  if (!visit || visit.status === "CLOSED") return NOTHING_ADDED;
+  if (!isSubtaskOnlyCarryForwardVisit(visit)) return NOTHING_ADDED;
+  if (!(await isClientsOnlyVisitInItsWeek(visit))) return NOTHING_ADDED;
+  return addMissingConfiguredTasks(visitId);
 }
 
 // ─── Default task type definitions ────────────────────────────────────────────
@@ -158,11 +329,18 @@ export async function resolveClientTaskPlan(clientId: string): Promise<TaskPlanE
  * Batch-scaffold tasks + subtasks for a visit from a resolved task plan.
  * Exactly 3 DB round-trips regardless of task count:
  *   1. task.createMany, 2. fetch created task ids, 3. subtask.createMany.
+ *
+ * Pass `db` to run inside a caller's transaction, so the visit and its
+ * configured task structure are committed together or not at all.
  */
-export async function createTasksWithSubtasks(visitId: string, plan: TaskPlanEntry[]): Promise<void> {
+export async function createTasksWithSubtasks(
+  visitId: string,
+  plan: TaskPlanEntry[],
+  db: TaskScaffoldDb = prisma
+): Promise<void> {
   if (plan.length === 0) return;
 
-  await prisma.task.createMany({
+  await db.task.createMany({
     data: plan.map((entry) => ({
       visitId,
       taskType: entry.type,
@@ -172,7 +350,7 @@ export async function createTasksWithSubtasks(visitId: string, plan: TaskPlanEnt
     })),
   });
 
-  const created = await prisma.task.findMany({
+  const created = await db.task.findMany({
     where: { visitId },
     select: { id: true, taskType: true },
   });
@@ -190,7 +368,7 @@ export async function createTasksWithSubtasks(visitId: string, plan: TaskPlanEnt
   });
 
   if (subtaskRows.length > 0) {
-    await prisma.subtask.createMany({ data: subtaskRows });
+    await db.subtask.createMany({ data: subtaskRows });
   }
 }
 
@@ -224,12 +402,20 @@ export async function syncClientPendingVisits(clientId: string): Promise<{ visit
   const planByType = new Map(plan.map((p) => [p.type, p]));
 
   for (const visit of pendingVisits) {
-    // Rule-2 carry-forward visits hold ONLY the subtasks that were missed the
-    // previous week. Scaffolding the client's task configuration into them
-    // would rebuild the whole visit and defeat subtask-level carry-forward
-    // entirely, so they are never synced. Rule-1 missed-weekly visits are
-    // normal full visits and DO get synced (they carry no such marker).
-    if (isSubtaskOnlyCarryForwardVisit(visit)) continue;
+    // Rule-2 carry-forward visits hold the subtasks that were missed the
+    // previous week. The full sync below REBUILDS a visit from the client's
+    // configuration — replacing template subtasks and deleting tasks whose
+    // type was removed — and running that against a carry-forward visit would
+    // defeat subtask-level carry-forward entirely. So they never take that
+    // path.
+    //
+    // They do still need the client's configured work when they are standing
+    // in for the client's visit that week; that path adds what is missing and
+    // removes nothing, so every carried row survives untouched.
+    if (isSubtaskOnlyCarryForwardVisit(visit)) {
+      await ensureCarryForwardVisitHasClientTasks(visit.id);
+      continue;
+    }
 
     const existingByType = new Map(visit.tasks.map((t) => [t.taskType, t]));
 
@@ -433,26 +619,30 @@ export async function createVisitForClient(
   // Skipped entirely for a carry-forward-only visit, which must start empty.
   const orderedTaskTypes = skipTaskScaffolding ? [] : await resolveClientTaskPlan(clientId);
 
-  // ── STEP 1: Create the Visit record ─────────────────────────────────────
-  // Plain write — no transaction wrapper — fully compatible with all Prisma adapters.
-  const visit = await prisma.visit.create({
-    data: {
-      visitNumber,
-      clientId,
-      executiveId,
-      status:        "PENDING",
-      scheduledDate: scheduledDate ?? now,
-      endDate:       endDate ?? null,
-      notes:         notes ?? null,
-    },
+  // ── STEPS 1 + 2: the Visit and its configured Tasks/Subtasks, atomically ──
+  // One transaction, so a failure while scaffolding can never leave a visit
+  // behind with no tasks on it — the state that makes an executive open a
+  // visit and find the client's configured work missing.
+  //
+  // Tasks and subtasks are batched (createMany + one fetch + one createMany)
+  // rather than one task.create + one subtask.createMany per task type, which
+  // keeps client creation / duplication / repeat visits fast on serverless +
+  // remote Postgres.
+  const visit = await prisma.$transaction(async (tx) => {
+    const created = await tx.visit.create({
+      data: {
+        visitNumber,
+        clientId,
+        executiveId,
+        status:        "PENDING",
+        scheduledDate: scheduledDate ?? now,
+        endDate:       endDate ?? null,
+        notes:         notes ?? null,
+      },
+    });
+    await createTasksWithSubtasks(created.id, orderedTaskTypes, tx);
+    return created;
   });
-
-  // ── STEP 2: Create Tasks and Subtasks (batched - 3 queries total) ────────
-  // Previously one task.create + one subtask.createMany PER task type
-  // (2N round-trips to the DB). Batched into createMany + one fetch + one
-  // createMany, which makes client creation / duplication / repeat visits
-  // noticeably faster on serverless + remote Postgres.
-  await createTasksWithSubtasks(visit.id, orderedTaskTypes);
 
   // ── STEP 3: Log activity ─────────────────────────────────────────────────
   await prisma.activityLog.create({
