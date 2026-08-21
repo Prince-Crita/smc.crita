@@ -75,7 +75,6 @@ export function SystemHealthClient() {
       const j = await res.json().catch(() => null) as { error?: string } | null;
       if (!res.ok) { toast.error(j?.error ?? `Correction failed (${res.status})`); return; }
       toast.success("Corrected. This can be undone from the Control Panel.");
-      await refresh();
       revalidateAll();
     } finally {
       setBusy(false);

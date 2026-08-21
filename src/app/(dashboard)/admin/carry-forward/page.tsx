@@ -358,7 +358,8 @@ export default function CarryForwardPage() {
       toast.success(`${j?.moved ?? 0} carry-forward task(s) updated`);
       setSelectedCarried((prev) => { const n = new Set(prev); for (const id of ids) n.delete(id); return n; });
       setManage((prev) => ({ ...prev, [clientId]: blankDecision(visits[0]) }));
-      await refresh();
+      // revalidateAll() refetches this page's own live query too, so the
+      // separate refresh() that used to sit here only duplicated the request.
       revalidateAll();
     } finally { setBusyClient(null); }
   };
@@ -371,7 +372,6 @@ export default function CarryForwardPage() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) { toast.error(json?.error || "Failed to remove"); return; }
       toast.success("Carry-forward task removed");
-      refresh();
       revalidateAll();
     } catch {
       toast.error("Error removing task");
@@ -389,7 +389,6 @@ export default function CarryForwardPage() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) { toast.error(json?.error || "Failed to remove the request"); return; }
       toast.success("Carry-forward request removed");
-      refresh();
       revalidateAll();
     } catch {
       toast.error("Error removing the request");

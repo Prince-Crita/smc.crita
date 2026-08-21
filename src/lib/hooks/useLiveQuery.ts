@@ -244,6 +244,9 @@ export function useLiveQuery<T>(
   const inFlightRef = useRef(false);
   const lastRunAtRef = useRef(0);
   const MIN_REFETCH_GAP_MS = 3000;
+  // Set when a forced revalidation arrives while a request is already in
+  // flight, so it is served as soon as that request finishes instead of lost.
+  const rerunRef = useRef(false);
 
   // Tracks whether we already have data. Background revalidations must NOT
   // set loading=true when data exists - most pages render a full skeleton on
@@ -254,7 +257,17 @@ export function useLiveQuery<T>(
 
   const run = useCallback(async (opts?: { force?: boolean }) => {
     if (!enabled) return;
-    if (inFlightRef.current) return;
+    if (inFlightRef.current) {
+      // A FORCED revalidation must never be dropped. It means "the user just
+      // changed something, get the new state" — returning early here left the
+      // screen showing pre-mutation data whenever a request happened to be in
+      // flight (a focus revalidation, or another component's broadcast landing
+      // mid-request). Remember it instead and re-run as soon as the current
+      // request settles. Unforced (focus/interval) triggers are still dropped,
+      // which is what keeps bursts from stacking.
+      if (opts?.force) rerunRef.current = true;
+      return;
+    }
     const now = Date.now();
     if (!opts?.force && now - lastRunAtRef.current < MIN_REFETCH_GAP_MS) return;
 
@@ -262,14 +275,20 @@ export function useLiveQuery<T>(
     lastRunAtRef.current = now;
     if (!hasDataRef.current) setLoading(true);
     try {
-      const result = await fetcherRef.current();
-      hasDataRef.current = true;
-      setData(result);
-      setError(null);
+      // Loop rather than recurse: if a forced revalidation arrived while this
+      // request was in flight, serve it immediately with one more fetch.
+      do {
+        rerunRef.current = false;
+        const result = await fetcherRef.current();
+        hasDataRef.current = true;
+        setData(result);
+        setError(null);
+      } while (rerunRef.current);
     } catch (err) {
       setError(err);
       console.error(err);
     } finally {
+      rerunRef.current = false;
       setLoading(false);
       inFlightRef.current = false;
     }

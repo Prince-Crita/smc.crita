@@ -8,6 +8,7 @@ import { getApprovedLeave } from "@/lib/utils/leave-check";
 import { isCarryForwardVisit } from "@/lib/utils/carry-forward";
 import { resolveClientTaskPlan, createTasksWithSubtasks } from "@/lib/utils/create-visit";
 import { normalizeAssignment } from "@/lib/utils/visit-assignment";
+import { executiveVisitScope } from "@/lib/utils/visit-access";
 
 
 // GET /api/admin/visits - All visits with filters
@@ -46,13 +47,24 @@ export async function GET(request: NextRequest) {
 
     const where: Record<string, unknown> = {};
     if (clientId) where.clientId = clientId;
-    if (executiveId) where.executiveId = executiveId;
+    // Filtering by an executive uses the same scope the executive's own views
+    // use, so a TEAM visit shows up for its members and not only for its lead.
+    // Matching on `executiveId` alone hid every team visit from the member the
+    // admin was filtering by, while the calendar (which already uses this
+    // scope) listed it — the two admin screens disagreed with each other.
+    if (executiveId) Object.assign(where, executiveVisitScope(executiveId));
     // Do NOT apply status filter to DB query - DB status != display status
 
     // Subtask progress comes from a per-visit COUNT in the database, not from
     // loading every subtask row (see lib/utils/visit-aggregates.ts). The three
     // reads below are independent, so they still run in parallel.
-    const [allVisits, clients, executives] = await Promise.all([
+    // When no client/executive filter is applied the aggregate is global — it
+    // does not depend on which visits come back — so it joins the parallel
+    // batch instead of costing an extra sequential database round-trip on the
+    // admin's most-used screen. Only the filtered case has to wait for the ids.
+    const isFiltered = Boolean(clientId || executiveId);
+
+    const [allVisits, clients, executives, unfilteredCounts] = await Promise.all([
       prisma.visit.findMany({
         where,
         select: {
@@ -78,14 +90,15 @@ export async function GET(request: NextRequest) {
         select: { id: true, name: true },
         orderBy: { name: "asc" },
       }),
+      isFiltered ? Promise.resolve(null) : getVisitSubtaskCounts(undefined),
     ]);
 
     // Scoped to exactly the visits just fetched when a filter is applied; the
     // unfiltered admin list groups over every visit in one pass instead of
     // sending several thousand ids back as a query parameter.
-    const counts = await getVisitSubtaskCounts(
-      clientId || executiveId ? allVisits.map((v) => v.id) : undefined
-    );
+    const counts = isFiltered
+      ? await getVisitSubtaskCounts(allVisits.map((v) => v.id))
+      : unfilteredCounts!;
 
     // Compute progress-based displayStatus for every visit using shared utility
     const visitsWithProgress = allVisits.map((visit) => {

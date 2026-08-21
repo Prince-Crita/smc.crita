@@ -7,7 +7,7 @@ import { formatDate, formatDateTime, getStatusColor, getProgressColor, getRating
 import { calculateDisplayStatus, DISPLAY_STATUS_LABELS } from "@/lib/utils/visit-status";
 import { cn } from "@/lib/utils/utils";
 import Link from "next/link";
-import { ArrowLeft, Building2, CheckCircle2, XCircle, RotateCcw, FileText, User, Calendar, Clock } from "lucide-react";
+import { ArrowLeft, Building2, CheckCircle2, XCircle, RotateCcw, FileText, User, Users, Calendar, Clock } from "lucide-react";
 import { AutoRevalidate } from "@/components/ui/AutoRevalidate";
 
 export default async function AdminVisitDetailPage({ params }: { params: Promise<{ visitId: string }> }) {
@@ -24,6 +24,13 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
     include: {
       client: true,
       executive: { select: { name: true, email: true } },
+      // A TEAM visit's members live here; `executive` above is the lead. Without
+      // this the page could only ever show the lead, which made a correctly
+      // assigned team look as though its members had never been saved.
+      assignments: {
+        select: { role: true, executive: { select: { name: true } } },
+        orderBy: { createdAt: "asc" },
+      },
       tasks: {
         include: { subtasks: { orderBy: { createdAt: "asc" } } },
         orderBy: { orderIndex: "asc" },
@@ -54,6 +61,12 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
   const summary = visit.summaryJson as {
   overallRating?: string;
 } | null;
+  // Team shape for the header. The lead is Visit.executiveId (rendered from
+  // `visit.executive`), so only the non-LEAD rows are listed as members.
+  const isTeam = visit.visitType === "TEAM";
+  const teamMembers = visit.assignments
+    .filter((a) => a.role !== "LEAD")
+    .map((a) => a.executive.name);
 
   return (
     <div className="space-y-5 max-w-4xl">
@@ -87,7 +100,10 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
         </div>
         <div className="flex flex-wrap gap-4 mt-4 pt-4 border-t border-slate-800 text-xs text-slate-500">
           <div className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" />Scheduled: <span className="text-slate-300">{formatDate(visit.scheduledDate)}</span></div>
-          <div className="flex items-center gap-1.5"><User className="w-3.5 h-3.5" />Executive: <span className="text-slate-300">{visit.executive.name}</span></div>
+          <div className="flex items-center gap-1.5"><User className="w-3.5 h-3.5" />{isTeam ? "Team Lead" : "Executive"}: <span className="text-slate-300">{visit.executive.name}</span></div>
+          {isTeam && (
+            <div className="flex items-center gap-1.5"><Users className="w-3.5 h-3.5" />Member{teamMembers.length === 1 ? "" : "s"}: <span className="text-slate-300">{teamMembers.length > 0 ? teamMembers.join(", ") : "none"}</span></div>
+          )}
           {visit.openedAt && <div className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" />Opened: <span className="text-slate-300">{formatDateTime(visit.openedAt)}</span></div>}
           {visit.closedAt && <div className="flex items-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />Closed: <span className="text-emerald-400">{formatDateTime(visit.closedAt)}</span></div>}
         </div>

@@ -125,11 +125,15 @@ export function CarryForwardModal({ onClose }: { onClose: () => void }) {
         return next;
       });
       setDateByClient((p) => ({ ...p, [clientId]: "" }));
-      // Refresh this popup, then push the change to every other mounted
-      // screen — dashboard, visits, calendar, visit details — so the new date
-      // is visible without the executive refreshing anything. Mutation-driven
-      // and one-shot: no polling, no refresh loop.
-      await refresh();
+      // Push the change to every mounted screen — this popup, the dashboard,
+      // visits, calendar, visit details — so the new date is visible without
+      // the executive refreshing anything. Mutation-driven and one-shot: no
+      // polling, no refresh loop.
+      //
+      // revalidateAll() already refetches THIS popup's own query (it is a
+      // mounted live query like any other), so the explicit refresh() that
+      // used to precede it only ever produced a second, identical request for
+      // /api/carry-forward on every reschedule.
       revalidateAll();
     } finally { setBusyClient(null); }
   };
