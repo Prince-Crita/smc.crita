@@ -2,12 +2,20 @@
   "name": "smc-task-management",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.19.0 <23",
+    "npm": ">=10.9.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "db:target": "node scripts/db-target.mjs",
+    "build:standalone": "node scripts/build-standalone.mjs",
+    "start:standalone": "node scripts/with-env.mjs .env.build --expect-remote -- node deployment/app/server.js",
+    "proxy:simulate": "node scripts/dev-proxy.mjs"
   },
   "prisma": {
     "seed": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts"

@@ -29,22 +29,33 @@ localhost and Vercel are unaffected.
 `NEXT_PUBLIC_BASE_PATH` is read at **BUILD TIME** — it must be set for
 `npm run build`, not only at startup.
 
-```bash
+```powershell
 npm ci
-DATABASE_URL='postgresql://…' ./build-standalone.sh
+npm run build:standalone
 ```
 
-`build-standalone.sh` does all of this:
+No database and no credentials are needed to build — the Prisma client is
+created lazily on first query, so `next build` never opens a connection.
 
-1. `NEXT_PUBLIC_BASE_PATH=/client-trial/smc-task-management BUILD_STANDALONE=1 npm run build`
-2. copies `.next/standalone/` → `smc-task-management-standalone/`
-3. copies `.next/static` and `public/` into it (Next does **not** include these
+`scripts/build-standalone.mjs` does all of this:
+
+1. checks the running Node matches `.nvmrc`
+2. `NEXT_PUBLIC_BASE_PATH=/client-trial/smc-task-management BUILD_STANDALONE=1 npm run build`
+3. copies `.next/standalone/` → `deployment/app/`
+4. copies `.next/static` and `public/` into it (Next does **not** include these
    in the standalone output — this is the single most common cause of "the page
    loads but there is no CSS/JS")
-4. deletes any `.env*` file Next copied in, so no secret ever ships
+5. deletes any `.env*` file Next copied in, so no secret ever ships —
+   Next **does** copy `.env.local`, so this step is not theoretical
+6. verifies the package: entry point, static assets, Prisma client, the
+   PostgreSQL driver, the base path actually compiled into `routes-manifest.json`,
+   and that no `.env` file survived
+7. writes `BUILD-INFO.json` recording the commit, Node/npm and dependency
+   versions the package was built from
 
 To build for a different mount point:
-`NEXT_PUBLIC_BASE_PATH=/some/other/path ./build-standalone.sh`
+`npm run build:standalone -- --base-path /some/other/path`
+(`--base-path ""` builds for the domain root.)
 
 > **Build on the same OS as the server.** The package includes a native image
 > library (`node_modules/@img/sharp-<platform>`). A package built on Windows
@@ -58,7 +69,7 @@ To build for a different mount point:
 ## 3. Run it
 
 ```bash
-cd smc-task-management-standalone
+cd deployment/app
 export DATABASE_URL='postgresql://…'
 export JWT_SECRET='…at least 32 characters…'
 export NODE_ENV=production
@@ -129,8 +140,24 @@ Full list in `.env.example`. Required on the company server:
 | `RESEND_API_KEY` | no | Visit-close summary emails; skipped silently if unset |
 | `RESEND_FROM_EMAIL` / `ADMIN_EMAIL` | no | Sender / recipient for the above |
 
-Never copy `.env.local` onto the server — it holds the Vercel/Neon production
-credentials. Set the server's own values in the process environment.
+Never copy a `.env` file into the deployment package. The hosted database
+connection string lives in `.env.build` (gitignored, and never loaded by
+Next.js on its own); `.env.local` holds the shared secrets. Set the server's own
+values in the process environment instead — systemd `EnvironmentFile=`, a pm2
+ecosystem file, or a Windows service definition.
+
+`deployment/.env.company.example` is the template to copy and fill in.
+
+To run the built package locally against `.env.build`:
+
+```powershell
+npm run start:standalone
+```
+
+That goes through `scripts/with-env.mjs`, which loads exactly one named env
+file, refuses to start when a stray shell variable would silently override it,
+and prints the resolved database host before running. `npm run db:target` shows
+which database every command would use, without connecting to anything.
 
 ---
 

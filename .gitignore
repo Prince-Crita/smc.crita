@@ -30,8 +30,17 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files — real ones NEVER get committed.
+# This blanket rule is what keeps .env.local, .env.development.local,
+# .env.build and .env.rehearsal out of the repository.
 .env*
+
+# …except the two TEMPLATES, which contain only placeholders. Without these
+# exceptions a fresh clone arrives with no record of which variables the app
+# needs, which is how a deployment ends up missing one.
+# Both are checked for real credentials before every commit.
+!.env.example
+!deployment/.env.company.example
 
 # vercel
 .vercel
@@ -54,3 +63,6 @@ next-env.d.ts
 # Local scratch/diagnostic output.
 /.diag/
 /.tmp-work/
+
+# Built deployment package — regenerate with `npm run build:standalone`, never commit
+/deployment/app/
