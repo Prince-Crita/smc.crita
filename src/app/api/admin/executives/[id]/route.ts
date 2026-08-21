@@ -142,13 +142,34 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 }
 
 // ─── DELETE /api/admin/executives/[id] ────────────────────────────────────────
-// Permanently deletes an executive. Only allowed when the executive has zero
-// footprint (no visits ever, no assigned clients, no attendance/leave/activity
-// history) — Visit.executiveId and similar FKs are required and have no
-// cascade-delete from User, so any history would otherwise block the delete
-// at the database level anyway.
+// Permanently deletes an executive.
+//
+// Deletion is blocked by BUSINESS relationships — work the executive is tied to
+// that another person or record depends on. It is NOT blocked by the
+// executive's own sign-in history.
+//
+// That distinction is the whole point. This check previously counted EVERY
+// activity_logs row for the user, and simply logging in writes a USER_LOGIN
+// row. So the moment an executive signed in even once they became permanently
+// undeletable, and the admin was told to "reassign clients and upcoming visits"
+// that did not exist — an account with no client, no visit and no task at all
+// still reported that message. The guard was reporting session noise as
+// business data.
+//
+// Blocking (someone/something else depends on it):
+//   assigned clients · visits owned · team memberships · leave · reassignments
+//   · delegations · admin operations · carry-forward approvals · any activity
+//   log recording actual WORK (anything other than sign-in/sign-out)
+//
+// Removed with the executive (theirs alone, meaningless once they are gone,
+// and only ever reached when every business check above passed):
+//   their USER_LOGIN / USER_LOGOUT rows · their attendance rows
+//
+// Protection for a real executive is therefore unchanged: anyone holding a
+// client, a visit of any status, or a record of real work is still refused.
 
-const BLOCKED_MESSAGE = "Reassign clients and upcoming visits before deleting this executive.";
+/** Activity-log actions that are pure session bookkeeping, not work. */
+const SESSION_LOG_ACTIONS = ["USER_LOGIN", "USER_LOGOUT"] as const;
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getAuthUser(request);
@@ -163,47 +184,92 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     const [
       visitCount,
       clientCount,
-      attendanceCount,
-      leaveCount,
+      seniorClientCount,
+      assignmentCount,
+      leaveOwnCount,
+      leaveReviewedCount,
       reassignFromCount,
       reassignToCount,
       reassignByCount,
       delegationFromCount,
       delegationToCount,
-      activityLogCount,
+      adminOperationCount,
+      carryForwardApprovalCount,
+      workLogCount,
     ] = await Promise.all([
       prisma.visit.count({ where: { executiveId: id } }),
       prisma.client.count({ where: { assignedExecId: id } }),
-      prisma.attendance.count({ where: { executiveId: id } }),
+      prisma.client.count({ where: { seniorExecId: id } }),
+      prisma.visitAssignment.count({ where: { executiveId: id } }),
       prisma.leaveRequest.count({ where: { executiveId: id } }),
+      prisma.leaveRequest.count({ where: { reviewedById: id } }),
       prisma.visitReassignment.count({ where: { fromExecutiveId: id } }),
       prisma.visitReassignment.count({ where: { toExecutiveId: id } }),
       prisma.visitReassignment.count({ where: { reassignedById: id } }),
       prisma.visitDelegation.count({ where: { fromExecutiveId: id } }),
       prisma.visitDelegation.count({ where: { toExecutiveId: id } }),
-      prisma.activityLog.count({ where: { userId: id } }),
+      prisma.adminOperation.count({ where: { userId: id } }),
+      prisma.subtask.count({ where: { carryForwardApprovedById: id } }),
+      // Activity that records real WORK — anything that is not sign-in/out.
+      prisma.activityLog.count({ where: { userId: id, action: { notIn: [...SESSION_LOG_ACTIONS] } } }),
     ]);
 
-    const hasFootprint =
-      visitCount > 0 || clientCount > 0 || attendanceCount > 0 || leaveCount > 0 ||
-      reassignFromCount > 0 || reassignToCount > 0 || reassignByCount > 0 ||
-      delegationFromCount > 0 || delegationToCount > 0 || activityLogCount > 0;
+    // Named so the admin is told what actually blocks, instead of being sent to
+    // reassign clients and visits that may not exist.
+    const blockers: string[] = [];
+    const add = (n: number, one: string, many = `${one}s`) => {
+      if (n > 0) blockers.push(`${n} ${n === 1 ? one : many}`);
+    };
+    add(clientCount + seniorClientCount, "assigned client");
+    add(visitCount, "visit");
+    add(assignmentCount, "team visit membership", "team visit memberships");
+    add(leaveOwnCount + leaveReviewedCount, "leave request");
+    add(reassignFromCount + reassignToCount + reassignByCount, "visit reassignment");
+    add(delegationFromCount + delegationToCount, "visit delegation");
+    add(adminOperationCount, "recorded admin operation");
+    add(carryForwardApprovalCount, "carry-forward approval");
+    add(workLogCount, "recorded action");
 
-    if (hasFootprint) {
-      return NextResponse.json({ error: BLOCKED_MESSAGE }, { status: 409 });
+    if (blockers.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            `This executive still has ${blockers.join(", ")}. ` +
+            `Reassign their clients and visits before deleting them.`,
+          blockedBy: blockers,
+        },
+        { status: 409 }
+      );
     }
 
-    await prisma.user.delete({ where: { id } });
+    // Nothing business-related is attached. Remove the executive together with
+    // the two kinds of record that exist only because the account existed, in
+    // ONE transaction so the account is never left half-removed.
+    const removed = await prisma.$transaction(async (tx) => {
+      const sessionLogs = await tx.activityLog.deleteMany({
+        where: { userId: id, action: { in: [...SESSION_LOG_ACTIONS] } },
+      });
+      const attendance = await tx.attendance.deleteMany({ where: { executiveId: id } });
+      await tx.user.delete({ where: { id } });
+      return { sessionLogs: sessionLogs.count, attendance: attendance.count };
+    });
 
     await prisma.activityLog.create({
       data: {
         userId: user.userId,
         action: "EXECUTIVE_DELETED",
-        metadata: { executiveId: id, executiveName: existing.name, deletedBy: user.name },
+        metadata: {
+          executiveId: id,
+          executiveName: existing.name,
+          executiveEmail: existing.email,
+          deletedBy: user.name,
+          removedSessionLogs: removed.sessionLogs,
+          removedAttendance: removed.attendance,
+        },
       },
     });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, removed });
   } catch (error) {
     console.error("Delete executive error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
