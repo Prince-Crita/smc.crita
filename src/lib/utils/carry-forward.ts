@@ -713,12 +713,28 @@ export async function approveCarryForward(
 
   for (const [clientId, items] of byClient.entries()) {
     try {
-      // §8 — reuse the client's existing visit on the destination date.
+      // §5 — whoever the admin selected owns the approved work; with no
+      // re-assignment the executive the work came from keeps it.
+      const targetExecutiveId = options.assignment?.leadId ?? items[0].task.visit.executiveId;
+
+      // §8 — reuse the client's existing visit on the destination date, but
+      // only one that ALREADY BELONGS TO THE TARGET EXECUTIVE (as owner/lead
+      // or as a team member). The reuse rule exists to stop a duplicate visit
+      // appearing for that executive on that day — it must never reach across
+      // to a DIFFERENT executive's visit for the same client, because the
+      // approval would then either drop the work into someone else's queue or,
+      // when a re-assignment is supplied, hand that executive's whole visit
+      // (its ordinary tasks included) to the newly selected one. When only
+      // another executive holds the day, the target gets their own visit below.
       let destination = await prisma.visit.findFirst({
         where: {
           clientId,
           scheduledDate: { gte: dayStart, lt: dayEnd },
           status: { in: ["PENDING", "OPEN"] },
+          OR: [
+            { executiveId: targetExecutiveId },
+            { assignments: { some: { executiveId: targetExecutiveId } } },
+          ],
         },
         orderBy: { scheduledDate: "asc" },
         include: { tasks: { include: { subtasks: true } } },
@@ -728,10 +744,7 @@ export async function approveCarryForward(
       if (!destination) {
         const { visitId } = await createVisitForClient(
           clientId,
-          // §5 — a re-assignment chosen at approval time owns the new visit
-          // from the moment it exists; otherwise the previous executive keeps
-          // the work, which is the historical behaviour.
-          options.assignment?.leadId ?? items[0].task.visit.executiveId,
+          targetExecutiveId,
           approvedByUserId,
           {
             scheduledDate: destinationDate,

@@ -209,13 +209,26 @@ export async function PATCH(request: NextRequest) {
       });
     }
 
-    // Is there already a visit for this client on the chosen date?
+    // Is there already a visit for this client on the chosen date that belongs
+    // to the SAME executive this work is currently assigned to?
+    //
+    // The scope matters. Matching on client + date alone would move the item
+    // into whatever visit happened to fall on that day — including another
+    // executive's — which silently transfers the work out of this executive's
+    // queue and modifies a visit nobody asked to touch. Re-dating may only
+    // ever land on a visit the current holder already works, so the item stays
+    // with them; if they have none on that day, the paths below give them one.
+    const holderExecutiveId = visit.executiveId;
     const existing = await prisma.visit.findFirst({
       where: {
         clientId: visit.clientId,
         scheduledDate: { gte: dayStart, lt: dayEnd },
         status: { in: ["PENDING", "OPEN"] },
         id: { not: visit.id },
+        OR: [
+          { executiveId: holderExecutiveId },
+          { assignments: { some: { executiveId: holderExecutiveId } } },
+        ],
       },
       include: { tasks: true },
     });
