@@ -5,6 +5,7 @@ import { isAdminRole } from "@/lib/auth/roles";
 import { getApprovedLeave } from "@/lib/utils/leave-check";
 import { applyAssignment, normalizeAssignment, readAssignment } from "@/lib/utils/visit-assignment";
 import { recordOperation } from "@/lib/utils/admin-operations";
+import { ensureVisitHasConfiguredTasks } from "@/lib/utils/create-visit";
 
 // ─── GET /api/admin/visits/[id]/assignment ───────────────────────────────────
 // Current assignment for a visit, in the shape PATCH accepts. Used by the
@@ -172,6 +173,25 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         },
       });
     });
+
+    // Assigning somebody to a visit is the moment it becomes real work, so it
+    // is the moment the client's configured tasks must be on it. A visit that
+    // only ever held carried subtasks — and whose carried items were later
+    // removed — otherwise reaches the executive as a set of empty task shells,
+    // or with the configured task types missing entirely. Additive: nothing
+    // already on the visit is touched, and a carry-forward-only visit keeps
+    // its narrower rule. Outside the transaction so a scaffolding problem can
+    // never roll back an assignment the admin has already been shown.
+    try {
+      const added = await ensureVisitHasConfiguredTasks(visitId);
+      if (added.tasksAdded || added.subtasksAdded) {
+        console.log(
+          `[assignment] ${visit.visitNumber}: added ${added.tasksAdded} task(s) and ${added.subtasksAdded} subtask(s) from the client's configuration`
+        );
+      }
+    } catch (err) {
+      console.error("[assignment] could not top up configured tasks:", err);
+    }
 
     // Reversible: restoring executiveId/visitType returns the visit to its
     // previous owner. `memberIds` is recorded too — team membership lives in

@@ -86,13 +86,29 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const body = await request.json().catch(() => ({}));
 
+    // The closing note is APPENDED, never written over what is already there.
+    //
+    // `notes` is not only free text: it also carries the markers that classify
+    // the visit — "[CARRY-FORWARD: …]" drives the carry-forward badge, the
+    // Carry Forward page and the stats; "[CF-SUBTASKS-ONLY]" pins a Rule-2
+    // carry-forward visit; "[RESCHEDULED-FROM: …]" records a vacated week.
+    // Assigning body.notes replaced the whole field, so closing a visit with
+    // an empty note box erased its classification permanently — a
+    // carry-forward visit stopped being recognisable as one the moment it was
+    // closed. Appending is also what the reschedule route already does, so the
+    // two paths now treat this field the same way.
+    const closingNote = typeof body.notes === "string" ? body.notes.trim() : "";
+    const mergedNotes = closingNote
+      ? [visit.notes?.trim(), closingNote].filter(Boolean).join("\n")
+      : undefined; // undefined ⇒ Prisma leaves the column untouched
+
     // Close the visit
     const closedVisit = await prisma.visit.update({
       where: { id: visitId },
       data: {
         status: "CLOSED",
         closedAt: new Date(),
-        notes: body.notes,
+        ...(mergedNotes !== undefined && { notes: mergedNotes }),
         summaryJson: summary as unknown as Prisma.InputJsonValue,
       },
     });

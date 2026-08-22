@@ -221,6 +221,46 @@ export async function ensureCarryForwardVisitHasClientTasks(visitId: string): Pr
   return addMissingConfiguredTasks(visitId);
 }
 
+/**
+ * THE GUARANTEE: a visit an executive has been assigned to carries the
+ * client's configured work.
+ *
+ * Call this from every path that assigns or re-assigns a visit to somebody.
+ * Handing an executive a visit is the moment it becomes real work, and it is
+ * the last point at which a missing task list can still be caught before they
+ * are standing in front of the client with nothing to do.
+ *
+ * Why a visit can reach that point with tasks missing: a carry-forward
+ * destination visit only ever gets the main tasks its CARRIED items need, and
+ * it gets them empty — `approveCarryForward` and `executeCarryForward` create
+ * a task on demand purely to hold a carried subtask. If those carried subtasks
+ * are later removed (admin → Carry Forward → remove), the tasks stay behind as
+ * empty shells and the client's configured task types that had no carried item
+ * were never created at all. Nothing then back-fills them: the full
+ * configuration sync (syncClientPendingVisits) runs only when an admin edits
+ * Task Configuration, which may never happen again for that client.
+ *
+ * Purely ADDITIVE — see addMissingConfiguredTasks. Existing tasks, subtasks,
+ * completion, carried items and progress are never renamed, reordered,
+ * replaced or deleted.
+ *
+ * Rule 2 is preserved: a carry-forward-ONLY visit still goes through the
+ * narrower gate above, so a visit that exists purely to hold carried subtasks
+ * alongside the client's real visit stays exactly that.
+ */
+export async function ensureVisitHasConfiguredTasks(visitId: string): Promise<ScaffoldResult> {
+  const visit = await prisma.visit.findUnique({
+    where: { id: visitId },
+    select: { id: true, notes: true, status: true },
+  });
+  // Closed visits are completed history — they keep what they closed with.
+  if (!visit || visit.status === "CLOSED") return NOTHING_ADDED;
+
+  return isSubtaskOnlyCarryForwardVisit(visit)
+    ? ensureCarryForwardVisitHasClientTasks(visitId)
+    : addMissingConfiguredTasks(visitId);
+}
+
 // ─── Default task type definitions ────────────────────────────────────────────
 
 export const DEFAULT_TASK_TYPES = [

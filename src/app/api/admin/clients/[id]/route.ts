@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { isAdminRole } from "@/lib/auth/roles";
-import { createVisitForClient } from "@/lib/utils/create-visit";
+import { createVisitForClient, ensureVisitHasConfiguredTasks } from "@/lib/utils/create-visit";
 import { recordOperation } from "@/lib/utils/admin-operations";
 import { applyAssignment, normalizeAssignment } from "@/lib/utils/visit-assignment";
 
@@ -197,14 +197,23 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
                 },
               });
             }
+
+            // The executive (or the date) just changed on a visit that already
+            // existed. It must carry the client's configured work — the
+            // reassignment above moves the visit but has never created a task.
+            await ensureVisitHasConfiguredTasks(visit.id);
           }
           visitInfo = { visitsSynced: activeVisits.length };
         } else if (execAssigned) {
-          // No active visit exists yet — create one on the correct date
+          // No active visit exists yet — create one on the correct date.
           visitInfo = await createVisitForClient(id, newExecId!, user.userId, {
             scheduledDate: newStartDate ?? undefined,
             endDate: newEndDate ?? undefined,
           });
+          // createVisitForClient returns an EXISTING active visit rather than
+          // creating a duplicate, and that early return does no scaffolding —
+          // so the returned visit still has to be checked.
+          if (visitInfo?.visitId) await ensureVisitHasConfiguredTasks(visitInfo.visitId);
         }
       } catch (visitErr) {
         console.error("[create-visit] Failed to sync visit after client update:", visitErr);
@@ -236,6 +245,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           // Already validated up-front; this can only be a genuine surprise.
           if (normalized.error) { visitError = normalized.error; break; }
           await applyAssignment(prisma, v.id, normalized.value);
+          // Handing the visit to an executive is the moment it must carry the
+          // client's configured work. A visit that was created only to hold
+          // carried subtasks — and had them removed again — otherwise arrives
+          // with empty task shells, or with configured task types missing
+          // outright, which is what "the visit is there but the tasks are not"
+          // looks like from the executive's side. Additive only.
+          await ensureVisitHasConfiguredTasks(v.id);
         }
       } catch (err) {
         console.error("[client-edit] assignment update failed:", err);
