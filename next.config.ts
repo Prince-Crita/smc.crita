@@ -1,26 +1,18 @@
 import type { NextConfig } from "next";
+import { APP_BASE_PATH, resolveBasePath } from "./config/base-path.mjs";
 
 /**
  * Mount point of the application.
  *
  * EMPTY BY DEFAULT — locally and on Vercel the app keeps serving from the
- * domain root exactly as before (http://localhost:3000/, /api/...). Nothing
- * about the current deployment changes unless the variable below is set.
+ * domain root exactly as before (http://localhost:3000/, /api/...).
  *
- * Set NEXT_PUBLIC_BASE_PATH at BUILD TIME only when the app is served from a
- * sub-path behind a reverse proxy, e.g.
- *
- *   NEXT_PUBLIC_BASE_PATH=/client-trial/smc-task-management npm run build
- *
- * Next.js then emits every asset, page link and API call under that prefix
- * (/client-trial/smc-task-management/_next/..., .../api/...), which is what
- * makes the app reachable through a path-prefixed proxy. The internal route
- * structure is untouched: routes are still authored and matched as /api/*,
- * /admin/*, /executive/* — the prefix is added by the framework at the edges.
+ * Company-server standalone builds default to APP_BASE_PATH in config/base-path.mjs.
+ * Override with NEXT_PUBLIC_BASE_PATH at build time if needed.
  *
  * The proxy must forward the request URI UNCHANGED (do not strip the prefix).
  */
-const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
+const basePath = resolveBasePath();
 
 /**
  * Self-contained server output for the company server.

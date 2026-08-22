@@ -1,3 +1,15 @@
+import {
+  APP_BASE_PATH,
+  PUBLIC_APP_ORIGIN,
+  PUBLIC_APP_URL,
+  resolveBasePath,
+} from "../../../config/base-path.mjs";
+
+export { APP_BASE_PATH, PUBLIC_APP_ORIGIN, PUBLIC_APP_URL };
+
+/** The configured mount point ("" when the app is served from the domain root). */
+export const BASE_PATH = resolveBasePath();
+
 /**
  * Resolve a path in /public for the mount point the app is served from.
  *
@@ -11,15 +23,8 @@
  *      parameter through the router, where an un-prefixed "/logo.png" no
  *      longer exists — everything is served under the base path — and answers
  *      400 "The requested resource isn't a valid image".
- *
- * With no base path configured (localhost, Vercel) this returns its argument
- * unchanged, so nothing about the current deployment changes.
  */
-const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
-
-/** The configured mount point ("" when the app is served from the domain root). */
-export const BASE_PATH = basePath;
-
 export function assetPath(path: string): string {
-  return `${basePath}${path}`;
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  return `${BASE_PATH}${normalized}`;
 }

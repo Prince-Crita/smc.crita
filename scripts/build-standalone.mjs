@@ -37,15 +37,14 @@
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-
-const DEFAULT_BASE_PATH = "/client-trial/smc-task-management";
+import { APP_BASE_PATH } from "../config/base-path.mjs";
 
 const argv = process.argv.slice(2);
 const argOf = (name, fallback) => {
   const i = argv.indexOf(name);
   return i !== -1 && argv[i + 1] !== undefined ? argv[i + 1] : fallback;
 };
-const basePath = argOf("--base-path", DEFAULT_BASE_PATH).replace(/\/$/, "");
+const basePath = argOf("--base-path", APP_BASE_PATH).replace(/\/$/, "");
 const outDir = resolve(argOf("--out", "deployment/app"));
 const root = process.cwd();
 

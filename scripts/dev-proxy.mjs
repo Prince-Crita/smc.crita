@@ -37,12 +37,13 @@
  * failure for yourself and recognise it if it happens tomorrow.
  */
 import http from "node:http";
+import { APP_BASE_PATH } from "../config/base-path.mjs";
 
 const argv = process.argv.slice(2);
 const argOf = (n, d) => { const i = argv.indexOf(n); return i !== -1 && argv[i + 1] ? argv[i + 1] : d; };
 const PORT = Number(argOf("--port", 8080));
 const TARGET = Number(argOf("--target", 3000));
-const PREFIX = argOf("--prefix", "/client-trial/smc-task-management").replace(/\/$/, "");
+const PREFIX = argOf("--prefix", APP_BASE_PATH).replace(/\/$/, "");
 const STRIP = argv.includes("--strip");
 
 let requests = 0, errors = 0;

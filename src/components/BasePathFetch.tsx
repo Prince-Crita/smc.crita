@@ -21,7 +21,9 @@
  * all: no patch is installed and fetch behaves exactly as before.
  */
 
-const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
+import { BASE_PATH } from "@/lib/utils/asset-path";
+
+const basePath = BASE_PATH;
 
 declare global {
   interface Window {
