@@ -387,4 +387,3 @@ RESEND_API_KEY="re_123456789"
 * **Geo-Fencing:** Require executives to capture GPS coordinates proving physical presence at the client site before allowing visit closure.
 * **Photo Attachments:** S3/Blob storage integration to allow photo evidence upload for subtask completion.
 
-check deployment
