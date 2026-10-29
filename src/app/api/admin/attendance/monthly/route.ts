@@ -22,20 +22,42 @@ export async function GET(request: NextRequest) {
     const execId = searchParams.get("executiveId");
 
     const now = new Date();
-    const [yearStr, monthStr] = (monthParam || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`).split("-");
+    const [yearStr, monthStr] = (
+      monthParam ||
+      `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
+    ).split("-");
     const year = parseInt(yearStr, 10);
     const monthIndex = parseInt(monthStr, 10) - 1; // 0-based
 
-    const monthStart = toMidnightIST(new Date(Date.UTC(year, monthIndex, 1, 12)));
-    const nextMonthStart = toMidnightIST(new Date(Date.UTC(year, monthIndex + 1, 1, 12)));
+    const monthStart = toMidnightIST(
+      new Date(Date.UTC(year, monthIndex, 1, 12)),
+    );
+    const nextMonthStart = toMidnightIST(
+      new Date(Date.UTC(year, monthIndex + 1, 1, 12)),
+    );
 
     // Don't count days beyond today as "working days" for an in-progress month
     const todayIST = toMidnightIST(now);
-    const effectiveEnd = nextMonthStart < todayIST ? nextMonthStart : new Date(todayIST.getTime() + 24 * 60 * 60 * 1000);
-    const totalWorkingDays = Math.max(
-      0,
-      Math.round((effectiveEnd.getTime() - monthStart.getTime()) / (24 * 60 * 60 * 1000))
-    );
+    const effectiveEnd =
+      nextMonthStart < todayIST
+        ? nextMonthStart
+        : new Date(todayIST.getTime() + 24 * 60 * 60 * 1000);
+
+    const totalWorkingDays = (() => {
+      let count = 0;
+      const current = new Date(monthStart);
+
+      while (current < effectiveEnd) {
+        // getUTCDay(): Sunday = 0
+        if (current.getUTCDay() !== 0) {
+          count++;
+        }
+
+        current.setUTCDate(current.getUTCDate() + 1);
+      }
+
+      return count;
+    })();
 
     const executives = await prisma.user.findMany({
       where: { role: "EXECUTIVE", ...(execId ? { id: execId } : {}) },
@@ -61,13 +83,21 @@ export async function GET(request: NextRequest) {
     ]);
 
     const summary = executives.map((exec) => {
-      const execAttendance = attendanceRecords.filter((r) => r.executiveId === exec.id);
+      const execAttendance = attendanceRecords.filter(
+        (r) => r.executiveId === exec.id,
+      );
       const execLeave = leaveRecords.filter((r) => r.executiveId === exec.id);
       const presentCount = execAttendance.length;
       const lateCount = execAttendance.filter((r) => r.isLate).length;
       const leaveCount = execLeave.length;
-      const absentCount = Math.max(0, totalWorkingDays - presentCount - leaveCount);
-      const attendancePercentage = totalWorkingDays === 0 ? 0 : Math.round((presentCount / totalWorkingDays) * 100);
+      const absentCount = Math.max(
+        0,
+        totalWorkingDays - presentCount - leaveCount,
+      );
+      const attendancePercentage =
+        totalWorkingDays === 0
+          ? 0
+          : Math.round((presentCount / totalWorkingDays) * 100);
 
       return {
         executiveId: exec.id,
@@ -92,10 +122,18 @@ export async function GET(request: NextRequest) {
     }[] = [];
 
     if (execId) {
-      const leaveDateKeys = new Set(leaveRecords.map((r) => r.date.toISOString().slice(0, 10)));
-      const attendanceByDate = new Map(attendanceRecords.map((r) => [r.date.toISOString().slice(0, 10), r]));
+      const leaveDateKeys = new Set(
+        leaveRecords.map((r) => r.date.toISOString().slice(0, 10)),
+      );
+      const attendanceByDate = new Map(
+        attendanceRecords.map((r) => [r.date.toISOString().slice(0, 10), r]),
+      );
 
-      for (let d = new Date(monthStart); d < effectiveEnd; d = new Date(d.getTime() + 24 * 60 * 60 * 1000)) {
+      for (
+        let d = new Date(monthStart);
+        d < effectiveEnd;
+        d = new Date(d.getTime() + 24 * 60 * 60 * 1000)
+      ) {
         const key = d.toISOString().slice(0, 10);
         const rec = attendanceByDate.get(key);
         const onLeave = leaveDateKeys.has(key);
@@ -117,6 +155,9 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error("Admin monthly attendance GET error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }
