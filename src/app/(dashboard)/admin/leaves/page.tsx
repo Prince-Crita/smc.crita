@@ -1,17 +1,30 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { ClipboardList, CheckCircle2, XCircle, Clock, RefreshCw, ChevronDown } from "lucide-react";
+import {
+  ClipboardList,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  RefreshCw,
+  ChevronDown,
+} from "lucide-react";
 import { cn } from "@/lib/utils/utils";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import toast from "react-hot-toast";
 import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-interface Executive { id: string; name: string; email: string }
+interface Executive {
+  id: string;
+  name: string;
+  email: string;
+}
 interface LeaveRequest {
   id: string;
   date: string;
+  leaveType: "FULL_DAY" | "HALF_DAY";
+  halfDayPeriod: "FIRST_HALF" | "SECOND_HALF" | null;
   reason: string;
   status: "PENDING" | "APPROVED" | "REJECTED";
   adminComment: string | null;
@@ -24,7 +37,11 @@ interface LeaveRequest {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-IN", {
-    weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
   });
 }
 
@@ -34,7 +51,11 @@ function LeaveCard({
   onAction,
 }: {
   leave: LeaveRequest;
-  onAction: (id: string, action: "approve" | "reject", comment: string) => Promise<void>;
+  onAction: (
+    id: string,
+    action: "approve" | "reject",
+    comment: string,
+  ) => Promise<void>;
 }) {
   const [comment, setComment] = useState("");
   const [expanded, setExpanded] = useState(false);
@@ -50,7 +71,7 @@ function LeaveCard({
   };
 
   const statusColors = {
-    PENDING:  "bg-amber-50 border-amber-200 text-amber-700",
+    PENDING: "bg-amber-50 border-amber-200 text-amber-700",
     APPROVED: "bg-green-50 border-green-200 text-green-700",
     REJECTED: "bg-red-50   border-red-200   text-red-700",
   };
@@ -65,17 +86,39 @@ function LeaveCard({
               {leave.executive.name.charAt(0).toUpperCase()}
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-bold text-[#0f1829]">{leave.executive.name}</p>
-              <p className="text-xs text-[#8896a9] truncate">{leave.executive.email}</p>
+              <p className="text-sm font-bold text-[#0f1829]">
+                {leave.executive.name}
+              </p>
+              <p className="text-xs text-[#8896a9] truncate">
+                {leave.executive.email}
+              </p>
             </div>
           </div>
-          <span className={cn("text-[11px] font-bold px-2 py-0.5 rounded-full border flex-shrink-0", statusColors[leave.status])}>
+          <span
+            className={cn(
+              "text-[11px] font-bold px-2 py-0.5 rounded-full border flex-shrink-0",
+              statusColors[leave.status],
+            )}
+          >
             {leave.status}
           </span>
         </div>
 
-        <div className="mt-3 flex items-center gap-4 text-xs text-[#8896a9]">
-          <span className="font-semibold text-[#0f1829]">{fmtDate(leave.date)}</span>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[#8896a9]">
+          <span className="font-semibold text-[#0f1829]">
+            {fmtDate(leave.date)}
+          </span>
+
+          <span className="px-2 py-1 rounded-md bg-[#f1f4f9] text-[#25488e] font-semibold">
+            {leave.leaveType === "HALF_DAY" ? "Half Day" : "Full Day"}
+            {leave.leaveType === "HALF_DAY" &&
+              ` · ${
+                leave.halfDayPeriod === "FIRST_HALF"
+                  ? "First Half"
+                  : "Second Half"
+              }`}
+          </span>
+
           <span>Applied {fmtDate(leave.createdAt)}</span>
         </div>
 
@@ -97,13 +140,20 @@ function LeaveCard({
             className="w-full flex items-center justify-between px-5 py-2.5 text-xs font-semibold text-[#25488e] hover:text-[#1e3a72] transition-colors"
           >
             Review request
-            <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", expanded && "rotate-180")} />
+            <ChevronDown
+              className={cn(
+                "w-3.5 h-3.5 transition-transform",
+                expanded && "rotate-180",
+              )}
+            />
           </button>
 
           {expanded && (
             <div className="px-5 pb-4 space-y-3">
               <div>
-                <label className="text-xs font-semibold text-[#4a5568] mb-1 block">Admin Comment (optional)</label>
+                <label className="text-xs font-semibold text-[#4a5568] mb-1 block">
+                  Admin Comment (optional)
+                </label>
                 <textarea
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
@@ -140,27 +190,37 @@ function LeaveCard({
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function AdminLeavesPage() {
-  const [statusFilter, setStatusFilter] = useState<"PENDING" | "APPROVED" | "REJECTED" | "all">("PENDING");
-  const [monthFilter, setMonthFilter] = useState(() => new Date().toISOString().slice(0, 7));
+  const [statusFilter, setStatusFilter] = useState<
+    "PENDING" | "APPROVED" | "REJECTED" | "all"
+  >("PENDING");
+  const [monthFilter, setMonthFilter] = useState(() =>
+    new Date().toISOString().slice(0, 7),
+  );
 
   const fetchLeaves = useCallback(async () => {
     const params = new URLSearchParams({ status: statusFilter });
     if (monthFilter) params.set("month", monthFilter);
-    const json = await fetchJSON<{ leaves: LeaveRequest[] }>(`/api/admin/leaves?${params.toString()}`);
+    const json = await fetchJSON<{ leaves: LeaveRequest[] }>(
+      `/api/admin/leaves?${params.toString()}`,
+    );
     return json.leaves ?? [];
   }, [statusFilter, monthFilter]);
 
   const { data, loading, refresh: refreshLeaves } = useLiveQuery(fetchLeaves);
   const leaves = data ?? [];
 
-  const handleAction = async (id: string, action: "approve" | "reject", comment: string) => {
+  const handleAction = async (
+    id: string,
+    action: "approve" | "reject",
+    comment: string,
+  ) => {
     try {
       const res = await fetch(`/api/leaves/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, comment }),
       });
-      const json = await res.json() as { error?: string };
+      const json = (await res.json()) as { error?: string };
       if (!res.ok) {
         toast.error(json.error ?? "Action failed");
         return;
@@ -174,10 +234,10 @@ export default function AdminLeavesPage() {
   };
 
   const tabs: { key: typeof statusFilter; label: string }[] = [
-    { key: "PENDING",  label: "Pending"  },
+    { key: "PENDING", label: "Pending" },
     { key: "APPROVED", label: "Approved" },
     { key: "REJECTED", label: "Rejected" },
-    { key: "all",      label: "All"      },
+    { key: "all", label: "All" },
   ];
 
   const pendingCount = leaves.filter((l) => l.status === "PENDING").length;
@@ -190,7 +250,9 @@ export default function AdminLeavesPage() {
           <h1 className="text-2xl font-bold text-[#0f1829]">Leave Approvals</h1>
           <p className="text-sm text-[#8896a9] mt-0.5">
             {pendingCount > 0
-              ? `${pendingCount} pending request${pendingCount !== 1 ? "s" : ""} awaiting review`
+              ? `${pendingCount} pending request${
+                  pendingCount !== 1 ? "s" : ""
+                } awaiting review`
               : "No pending requests"}
           </p>
         </div>
@@ -214,7 +276,7 @@ export default function AdminLeavesPage() {
                 "flex-1 px-3 py-1.5 rounded-md text-xs font-semibold transition-all",
                 statusFilter === tab.key
                   ? "bg-white text-[#25488e] shadow-sm border border-[#e2e7f0]"
-                  : "text-[#8896a9] hover:text-[#4a5568]"
+                  : "text-[#8896a9] hover:text-[#4a5568]",
               )}
             >
               {tab.label}
@@ -242,14 +304,19 @@ export default function AdminLeavesPage() {
       {/* ── Leave cards ── */}
       {loading ? (
         <div className="space-y-4">
-          {Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)}
+          {Array.from({ length: 3 }).map((_, i) => (
+            <SkeletonCard key={i} />
+          ))}
         </div>
       ) : leaves.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <div className="w-14 h-14 rounded-2xl bg-[#f1f4f9] flex items-center justify-center mb-4">
             <ClipboardList className="w-7 h-7 text-[#c8d2e0]" />
           </div>
-          <p className="text-sm font-medium text-[#4a5568]">No {statusFilter !== "all" ? statusFilter.toLowerCase() : ""} leave requests</p>
+          <p className="text-sm font-medium text-[#4a5568]">
+            No {statusFilter !== "all" ? statusFilter.toLowerCase() : ""} leave
+            requests
+          </p>
           <p className="text-xs text-[#8896a9] mt-1">
             {statusFilter === "PENDING"
               ? "No pending requests. Raise a leave as an Executive to see it here."
@@ -269,7 +336,8 @@ export default function AdminLeavesPage() {
         <div className="bg-white border border-[#e2e7f0] rounded-xl p-5 flex items-center gap-3">
           <Clock className="w-5 h-5 text-[#8896a9]" />
           <p className="text-sm text-[#8896a9]">
-            No pending requests. Raise a leave as the Executive to see it land here.
+            No pending requests. Raise a leave as the Executive to see it land
+            here.
           </p>
         </div>
       )}

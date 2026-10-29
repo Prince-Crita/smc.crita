@@ -2,8 +2,19 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
-  Clock, LogIn, LogOut, Flame, CalendarDays, AlertCircle, CheckCircle2,
-  ChevronRight, X, RotateCcw, Users, Bell, ArrowRight,
+  Clock,
+  LogIn,
+  LogOut,
+  Flame,
+  CalendarDays,
+  AlertCircle,
+  CheckCircle2,
+  ChevronRight,
+  X,
+  RotateCcw,
+  Users,
+  Bell,
+  ArrowRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils/utils";
 import { Modal } from "@/components/ui/Modal";
@@ -12,26 +23,41 @@ import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
 
 // --- Types ----------------------------------------------------------------------
 interface AttendanceRecord {
-  id: string; date: string; punchIn: string; punchOut: string | null;
-  workingMinutes: number | null; isLate: boolean; notes?: string | null;
+  id: string;
+  date: string;
+  punchIn: string;
+  punchOut: string | null;
+  workingMinutes: number | null;
+  isLate: boolean;
+  notes?: string | null;
 }
 interface UpcomingVisit {
-  id: string; visitNumber: string; scheduledDate: string;
+  id: string;
+  visitNumber: string;
+  scheduledDate: string;
   client: { name: string };
 }
 interface LeaveRequest {
-  id: string; date: string; reason: string;
+  id: string;
+  date: string;
+  reason: string;
   status: "PENDING" | "APPROVED" | "REJECTED";
-  adminComment: string | null; createdAt: string;
+  adminComment: string | null;
+  createdAt: string;
 }
 interface AttendanceData {
-  today: AttendanceRecord | null; history: AttendanceRecord[]; streak: number;
+  today: AttendanceRecord | null;
+  history: AttendanceRecord[];
+  streak: number;
 }
 interface LeavesData {
-  leaves: LeaveRequest[]; upcomingVisits: UpcomingVisit[];
+  leaves: LeaveRequest[];
+  upcomingVisits: UpcomingVisit[];
 }
 interface Executive {
-  id: string; name: string; email: string;
+  id: string;
+  name: string;
+  email: string;
 }
 interface Delegation {
   id: string;
@@ -39,36 +65,54 @@ interface Delegation {
   rejectionReason: string | null;
   toExecutive: { id: string; name: string };
   fromExecutive: { id: string; name: string };
-  visit: { visitNumber: string; scheduledDate: string; client: { name: string } };
+  visit: {
+    visitNumber: string;
+    scheduledDate: string;
+    client: { name: string };
+  };
   leaveDate: string;
   leaveReason: string;
 }
 interface IncomingDelegation {
   id: string;
   fromExecutive: { id: string; name: string };
-  visit: { id: string; visitNumber: string; scheduledDate: string; client: { name: string } };
+  visit: {
+    id: string;
+    visitNumber: string;
+    scheduledDate: string;
+    client: { name: string };
+  };
   leaveDate: string;
   leaveReason: string;
 }
 
 // --- Helpers ----------------------------------------------------------------------
 function fmtMinutes(min: number): string {
-  const h = Math.floor(min / 60); const m = min % 60;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("en-IN", {
-    hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "Asia/Kolkata",
   });
 }
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-IN", {
-    weekday: "short", day: "numeric", month: "short", timeZone: "Asia/Kolkata",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "Asia/Kolkata",
   });
 }
 function fmtDateShort(iso: string): string {
   return new Date(iso).toLocaleDateString("en-IN", {
-    day: "numeric", month: "short", timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+    timeZone: "Asia/Kolkata",
   });
 }
 
@@ -78,24 +122,39 @@ function LiveClock({ punchIn }: { punchIn: string | null }) {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
     timerRef.current = setInterval(() => setNow(new Date()), 1000);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
   }, []);
   const timeStr = now.toLocaleTimeString("en-IN", {
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Kolkata",
   });
   const dateStr = now.toLocaleDateString("en-IN", {
-    weekday: "short", day: "numeric", month: "short", timeZone: "Asia/Kolkata",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "Asia/Kolkata",
   });
   let duration = "";
   if (punchIn) {
-    const elapsed = Math.floor((now.getTime() - new Date(punchIn).getTime()) / 60000);
+    const elapsed = Math.floor(
+      (now.getTime() - new Date(punchIn).getTime()) / 60000,
+    );
     duration = fmtMinutes(elapsed);
   }
   return (
     <div className="text-center">
-      <p className="text-3xl font-black text-white tracking-wider tabular-nums font-mono">{timeStr}</p>
+      <p className="text-3xl font-black text-white tracking-wider tabular-nums font-mono">
+        {timeStr}
+      </p>
       <p className="text-sm text-white/70 mt-1">{dateStr}</p>
-      {duration && <p className="text-xs text-white/60 mt-0.5">Working: {duration}</p>}
+      {duration && (
+        <p className="text-xs text-white/60 mt-0.5">Working: {duration}</p>
+      )}
     </div>
   );
 }
@@ -103,12 +162,30 @@ function LiveClock({ punchIn }: { punchIn: string | null }) {
 // --- Status badge -----------------------------------------------------------------
 function LeaveStatusBadge({ status }: { status: LeaveRequest["status"] }) {
   const map = {
-    PENDING:  { label: "Pending",  cls: "bg-amber-100 text-amber-700 border-amber-200" },
-    APPROVED: { label: "Approved", cls: "bg-green-100 text-green-700 border-green-200" },
-    REJECTED: { label: "Rejected", cls: "bg-red-100  text-red-700   border-red-200"   },
+    PENDING: {
+      label: "Pending",
+      cls: "bg-amber-100 text-amber-700 border-amber-200",
+    },
+    APPROVED: {
+      label: "Approved",
+      cls: "bg-green-100 text-green-700 border-green-200",
+    },
+    REJECTED: {
+      label: "Rejected",
+      cls: "bg-red-100  text-red-700   border-red-200",
+    },
   };
   const m = map[status];
-  return <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full border", m.cls)}>{m.label}</span>;
+  return (
+    <span
+      className={cn(
+        "text-[10px] font-bold px-2 py-0.5 rounded-full border",
+        m.cls,
+      )}
+    >
+      {m.label}
+    </span>
+  );
 }
 
 // --- Incoming Delegation Card -----------------------------------------------------
@@ -118,7 +195,12 @@ function IncomingDelegationCard({
   responding,
 }: {
   delegation: IncomingDelegation;
-  onRespond: (id: string, visitId: string, action: "ACCEPT" | "REJECT", reason?: string) => void;
+  onRespond: (
+    id: string,
+    visitId: string,
+    action: "ACCEPT" | "REJECT",
+    reason?: string,
+  ) => void;
   responding: boolean;
 }) {
   const [showRejectInput, setShowRejectInput] = useState(false);
@@ -128,7 +210,9 @@ function IncomingDelegationCard({
     <div className="bg-white border border-[#25488e]/30 rounded-xl overflow-hidden shadow-sm">
       <div className="px-4 py-3 bg-[#eef2f9] border-b border-[#adc2e2] flex items-center gap-2">
         <Bell className="w-3.5 h-3.5 text-[#25488e]" />
-        <p className="text-xs font-bold text-[#25488e]">Coverage Request from {delegation.fromExecutive.name}</p>
+        <p className="text-xs font-bold text-[#25488e]">
+          Coverage Request from {delegation.fromExecutive.name}
+        </p>
       </div>
       <div className="p-4 space-y-3">
         <div className="bg-[#f8f9fc] rounded-lg p-3">
@@ -136,22 +220,29 @@ function IncomingDelegationCard({
             {delegation.visit.client.name} · {delegation.visit.visitNumber}
           </p>
           <p className="text-xs text-[#8896a9] mt-0.5">
-            {fmtDate(delegation.visit.scheduledDate)} · {fmtTime(delegation.visit.scheduledDate)}
+            {fmtDate(delegation.visit.scheduledDate)} ·{" "}
+            {fmtTime(delegation.visit.scheduledDate)}
           </p>
           <p className="text-[11px] text-[#8896a9] mt-1">
-            <span className="font-medium text-[#0f1829]">Leave reason:</span> {delegation.leaveReason}
+            <span className="font-medium text-[#0f1829]">Leave reason:</span>{" "}
+            {delegation.leaveReason}
           </p>
         </div>
         <p className="text-xs text-[#4a5568]">
           {delegation.fromExecutive.name} is requesting leave on{" "}
-          <span className="font-semibold">{fmtDateShort(delegation.leaveDate)}</span> and needs you to cover this visit.
-          If you accept, the visit will be transferred to you.
+          <span className="font-semibold">
+            {fmtDateShort(delegation.leaveDate)}
+          </span>{" "}
+          and needs you to cover this visit. If you accept, the visit will be
+          transferred to you.
         </p>
 
         {!showRejectInput ? (
           <div className="flex gap-2">
             <button
-              onClick={() => onRespond(delegation.id, delegation.visit.id, "ACCEPT")}
+              onClick={() =>
+                onRespond(delegation.id, delegation.visit.id, "ACCEPT")
+              }
               disabled={responding}
               className="flex-1 bg-[#25488e] hover:bg-[#1e3a72] text-white text-sm font-bold py-2.5 rounded-xl transition-colors press-effect disabled:opacity-50"
             >
@@ -176,14 +267,24 @@ function IncomingDelegationCard({
             />
             <div className="flex gap-2">
               <button
-                onClick={() => onRespond(delegation.id, delegation.visit.id, "REJECT", rejectReason)}
+                onClick={() =>
+                  onRespond(
+                    delegation.id,
+                    delegation.visit.id,
+                    "REJECT",
+                    rejectReason,
+                  )
+                }
                 disabled={responding}
                 className="flex-1 bg-red-600 hover:bg-red-700 text-white text-sm font-bold py-2 rounded-xl transition-colors press-effect disabled:opacity-50"
               >
                 {responding ? "…" : "Confirm Decline"}
               </button>
               <button
-                onClick={() => { setShowRejectInput(false); setRejectReason(""); }}
+                onClick={() => {
+                  setShowRejectInput(false);
+                  setRejectReason("");
+                }}
                 className="px-3 py-2 rounded-xl border border-[#e2e7f0] text-[#8896a9] hover:bg-[#f1f4f9] transition-colors"
               >
                 <X className="w-4 h-4" />
@@ -222,24 +323,35 @@ function VisitConflictPanel({
   submitting: boolean;
 }) {
   const [selectedExecId, setSelectedExecId] = useState("");
-  const [mode, setMode] = useState<"choose" | "delegate" | "reschedule">("choose");
+  const [mode, setMode] = useState<"choose" | "delegate" | "reschedule">(
+    "choose",
+  );
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [rescheduling, setRescheduling] = useState(false);
   const [rescheduleError, setRescheduleError] = useState("");
 
   const handleRescheduleSave = async () => {
-    if (!rescheduleDate) { toast.error("Please select a new date"); return; }
+    if (!rescheduleDate) {
+      toast.error("Please select a new date");
+      return;
+    }
     setRescheduling(true);
     setRescheduleError("");
     try {
       const res = await fetch(`/api/visits/${conflict.id}/reschedule`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date: rescheduleDate, reason: "Rescheduled to accommodate leave request" }),
+        body: JSON.stringify({
+          date: rescheduleDate,
+          reason: "Rescheduled to accommodate leave request",
+        }),
       });
-      const data = await res.json() as { error?: string; code?: string };
+      const data = (await res.json()) as { error?: string; code?: string };
       if (!res.ok) {
-        if (data.code === "LEAVE_CONFLICT") { setRescheduleError(data.error ?? "Leave conflict"); return; }
+        if (data.code === "LEAVE_CONFLICT") {
+          setRescheduleError(data.error ?? "Leave conflict");
+          return;
+        }
         toast.error(data.error ?? "Failed to reschedule");
         return;
       }
@@ -257,11 +369,16 @@ function VisitConflictPanel({
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-2">
           <div className="flex items-center gap-2">
             <Bell className="w-4 h-4 text-amber-600 flex-shrink-0" />
-            <p className="text-sm font-bold text-amber-800">Delegation request sent</p>
+            <p className="text-sm font-bold text-amber-800">
+              Delegation request sent
+            </p>
           </div>
           <p className="text-xs text-amber-700">
-            Waiting for <span className="font-semibold">{existingDelegation.toExecutive.name}</span> to respond.
-            You will be notified here when they accept or decline.
+            Waiting for{" "}
+            <span className="font-semibold">
+              {existingDelegation.toExecutive.name}
+            </span>{" "}
+            to respond. You will be notified here when they accept or decline.
           </p>
           <p className="text-[11px] text-amber-600">
             Visit: {conflict.client.name} · {fmtDate(conflict.scheduledDate)}
@@ -278,9 +395,14 @@ function VisitConflictPanel({
             <div className="flex items-start gap-2">
               <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-bold text-red-800">Delegation declined</p>
+                <p className="text-sm font-bold text-red-800">
+                  Delegation declined
+                </p>
                 <p className="text-xs text-red-700 mt-0.5">
-                  <span className="font-semibold">{existingDelegation.toExecutive.name}</span> declined to cover.
+                  <span className="font-semibold">
+                    {existingDelegation.toExecutive.name}
+                  </span>{" "}
+                  declined to cover.
                   {existingDelegation.rejectionReason && (
                     <> Reason: "{existingDelegation.rejectionReason}"</>
                   )}
@@ -289,7 +411,9 @@ function VisitConflictPanel({
             </div>
           </div>
           {/* Allow retry */}
-          <p className="text-xs text-[#4a5568] font-medium">What would you like to do?</p>
+          <p className="text-xs text-[#4a5568] font-medium">
+            What would you like to do?
+          </p>
           <div className="flex gap-2">
             <button
               onClick={() => setMode("delegate")}
@@ -314,10 +438,17 @@ function VisitConflictPanel({
                 <option value="">Select executive…</option>
                 {executives
                   .filter((e) => e.id !== existingDelegation.toExecutive.id)
-                  .map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                  .map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.name}
+                    </option>
+                  ))}
               </select>
               <button
-                onClick={() => { if (selectedExecId) onDelegateSubmit(conflict.id, selectedExecId); }}
+                onClick={() => {
+                  if (selectedExecId)
+                    onDelegateSubmit(conflict.id, selectedExecId);
+                }}
                 disabled={!selectedExecId || submitting}
                 className="w-full bg-[#25488e] hover:bg-[#1e3a72] text-white text-sm font-bold py-2.5 rounded-xl transition-colors press-effect disabled:opacity-50"
               >
@@ -341,8 +472,8 @@ function VisitConflictPanel({
         <div>
           <p className="text-xs font-bold text-red-800">Leave is blocked</p>
           <p className="text-xs text-red-700 mt-0.5">
-            {conflict.client.name} · {fmtConflictTime} is pre-set. Delegate or reschedule
-            it first — then the request goes to Admin.
+            {conflict.client.name} · {fmtConflictTime} is pre-set. Delegate or
+            reschedule it first — then the request goes to Admin.
           </p>
         </div>
       </div>
@@ -376,7 +507,11 @@ function VisitConflictPanel({
               className="w-full border border-[#e2e7f0] rounded-lg px-3 py-2.5 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30"
             >
               <option value="">Select executive…</option>
-              {executives.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+              {executives.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                </option>
+              ))}
             </select>
           </div>
           <div className="flex gap-2">
@@ -387,11 +522,20 @@ function VisitConflictPanel({
               <RotateCcw className="w-3.5 h-3.5" /> Reschedule instead
             </button>
             <button
-              onClick={() => { if (selectedExecId) onDelegateSubmit(conflict.id, selectedExecId); }}
+              onClick={() => {
+                if (selectedExecId)
+                  onDelegateSubmit(conflict.id, selectedExecId);
+              }}
               disabled={!selectedExecId || submitting || !leaveReason.trim()}
               className="flex-1 flex items-center justify-center gap-1.5 text-sm font-bold py-2.5 rounded-xl bg-[#25488e] hover:bg-[#1e3a72] text-white transition-colors press-effect disabled:opacity-50"
             >
-              {submitting ? "…" : <><ArrowRight className="w-3.5 h-3.5" /> Delegate & submit</>}
+              {submitting ? (
+                "…"
+              ) : (
+                <>
+                  <ArrowRight className="w-3.5 h-3.5" /> Delegate & submit
+                </>
+              )}
             </button>
           </div>
           <button
@@ -406,7 +550,8 @@ function VisitConflictPanel({
       {mode === "reschedule" && (
         <div className="space-y-3">
           <p className="text-xs text-[#4a5568]">
-            Pick a new date for this visit. Once saved, your leave request will be submitted automatically.
+            Pick a new date for this visit. Once saved, your leave request will
+            be submitted automatically.
           </p>
           {rescheduleError && (
             <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
@@ -415,12 +560,17 @@ function VisitConflictPanel({
             </div>
           )}
           <div>
-            <label className="text-xs font-semibold text-[#4a5568] mb-1 block">New visit date</label>
+            <label className="text-xs font-semibold text-[#4a5568] mb-1 block">
+              New visit date
+            </label>
             <input
               type="date"
               min={minDate}
               value={rescheduleDate}
-              onChange={(e) => { setRescheduleDate(e.target.value); setRescheduleError(""); }}
+              onChange={(e) => {
+                setRescheduleDate(e.target.value);
+                setRescheduleError("");
+              }}
               className="w-full border border-[#e2e7f0] rounded-lg px-3 py-2.5 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30 focus:border-[#25488e]"
             />
           </div>
@@ -456,12 +606,21 @@ export default function LeavePage() {
 
   // Leave form state
   const [selectedDate, setSelectedDate] = useState("");
-  const [leaveReason,  setLeaveReason]  = useState("");
+  const [leaveReason, setLeaveReason] = useState("");
+  const [leaveType, setLeaveType] = useState<"FULL_DAY" | "HALF_DAY">(
+    "FULL_DAY",
+  );
+  const [halfDayPeriod, setHalfDayPeriod] = useState<
+    "FIRST_HALF" | "SECOND_HALF"
+  >("FIRST_HALF");
+
   const [visitConflict, setVisitConflict] = useState<UpcomingVisit[]>([]);
 
   // Delegation state
-  const [executives, setExecutives]                 = useState<Executive[]>([]);
-  const [existingDelegations, setExistingDelegations] = useState<Record<string, Delegation>>({});
+  const [executives, setExecutives] = useState<Executive[]>([]);
+  const [existingDelegations, setExistingDelegations] = useState<
+    Record<string, Delegation>
+  >({});
   const [delegationSubmitting, setDelegationSubmitting] = useState(false);
   const [respondingId, setRespondingId] = useState<string | null>(null);
 
@@ -469,7 +628,9 @@ export default function LeavePage() {
     const [attData, leaveData, incomingData] = await Promise.all([
       fetchJSON<AttendanceData>("/api/attendance"),
       fetchJSON<LeavesData>("/api/leaves"),
-      fetchJSON<{ incoming: IncomingDelegation[] }>("/api/delegations/incoming"),
+      fetchJSON<{ incoming: IncomingDelegation[] }>(
+        "/api/delegations/incoming",
+      ),
     ]);
     return {
       attendance: attData,
@@ -478,7 +639,11 @@ export default function LeavePage() {
     };
   }, []);
 
-  const { data: allData, loading, refresh: fetchAll } = useLiveQuery(fetchAllData);
+  const {
+    data: allData,
+    loading,
+    refresh: fetchAll,
+  } = useLiveQuery(fetchAllData);
   const attendance = allData?.attendance ?? null;
   const leavesData = allData?.leavesData ?? null;
   const incomingDelegations = allData?.incomingDelegations ?? [];
@@ -490,16 +655,22 @@ export default function LeavePage() {
   // only re-runs when the selected date changes or the actual set of upcoming
   // visits changes, not on every background refresh.
   const upcomingVisitsKey = useMemo(
-    () => (leavesData?.upcomingVisits ?? []).map((v) => `${v.id}:${v.scheduledDate}`).join("|"),
-    [leavesData]
+    () =>
+      (leavesData?.upcomingVisits ?? [])
+        .map((v) => `${v.id}:${v.scheduledDate}`)
+        .join("|"),
+    [leavesData],
   );
 
   // When a conflict visit is found, fetch available executives + any existing delegation
   useEffect(() => {
-    if (!selectedDate || !leavesData) { setVisitConflict([]); return; }
+    if (!selectedDate || !leavesData) {
+      setVisitConflict([]);
+      return;
+    }
     const sel = new Date(selectedDate).toDateString();
     const conflicts = leavesData.upcomingVisits.filter(
-      (v) => new Date(v.scheduledDate).toDateString() === sel
+      (v) => new Date(v.scheduledDate).toDateString() === sel,
     );
     setVisitConflict(conflicts);
 
@@ -507,34 +678,43 @@ export default function LeavePage() {
     conflicts.forEach(async (v) => {
       try {
         const res = await fetch(`/api/visits/${v.id}/delegate`);
-        const data = await res.json() as {
+        const data = (await res.json()) as {
           executives: Executive[];
           existingDelegation: Delegation | null;
         };
         setExecutives(data.executives ?? []);
         if (data.existingDelegation) {
-          setExistingDelegations((prev) => ({ ...prev, [v.id]: data.existingDelegation! }));
+          setExistingDelegations((prev) => ({
+            ...prev,
+            [v.id]: data.existingDelegation!,
+          }));
         }
-      } catch { /* silent */ }
+      } catch {
+        /* silent */
+      }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate, upcomingVisitsKey]);
 
-  const minDate = (() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    return d.toISOString().split("T")[0];
-  })();
+  const minDate = new Date().toLocaleDateString("en-CA", {
+    timeZone: "Asia/Kolkata",
+  });
 
   // --- Attendance ---------------------------------------------------------------
   const handlePunchIn = async () => {
     setActionLoading(true);
     try {
       const res = await fetch("/api/attendance", { method: "POST" });
-      if (!res.ok) { const j = await res.json() as { error: string }; toast.error(j.error); return; }
+      if (!res.ok) {
+        const j = (await res.json()) as { error: string };
+        toast.error(j.error);
+        return;
+      }
       toast.success("Punched in successfully!");
       await fetchAll();
-    } finally { setActionLoading(false); }
+    } finally {
+      setActionLoading(false);
+    }
   };
   // Punch Out opens the confirmation modal — it never punches out directly.
   const handlePunchOut = () => {
@@ -546,7 +726,10 @@ export default function LeavePage() {
   // Confirms the punch-out, sending the mandatory note in the same request.
   const handleConfirmPunchOut = async () => {
     const text = punchOutNotes.trim();
-    if (!text) { setPunchOutError("Please enter a reason before punching out."); return; }
+    if (!text) {
+      setPunchOutError("Please enter a reason before punching out.");
+      return;
+    }
     setActionLoading(true);
     try {
       const res = await fetch("/api/attendance/punch-out", {
@@ -554,38 +737,56 @@ export default function LeavePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ notes: text }),
       });
-      const j = await res.json() as { error?: string };
-      if (!res.ok) { setPunchOutError(j.error ?? "Failed to punch out"); return; }
+      const j = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        setPunchOutError(j.error ?? "Failed to punch out");
+        return;
+      }
       setShowPunchOutConfirm(false);
       setPunchOutNotes("");
       toast.success("Punched out successfully!");
       // Refresh so the saved note appears — this is also what makes the note
       // visible to the admin without anyone hitting refresh.
       await fetchAll();
-    } finally { setActionLoading(false); }
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   // --- Leave submit (no conflict) -------------------------------------------
   const handleSubmitLeave = async (skipConflictCheck = false) => {
     if (!selectedDate || !leaveReason.trim()) {
-      toast.error("Please select a date and enter a reason"); return;
+      toast.error("Please select a date and enter a reason");
+      return;
     }
     if (!skipConflictCheck && visitConflict.length > 0) {
-      toast.error("Please delegate or reschedule your visit first"); return;
+      toast.error("Please delegate or reschedule your visit first");
+      return;
     }
     setActionLoading(true);
     try {
       const res = await fetch("/api/leaves", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date: selectedDate, reason: leaveReason.trim() }),
+        body: JSON.stringify({
+          date: selectedDate,
+          reason: leaveReason.trim(),
+          leaveType,
+          halfDayPeriod: leaveType === "HALF_DAY" ? halfDayPeriod : null,
+        }),
       });
-      const j = await res.json() as { error?: string };
-      if (!res.ok) { toast.error(j.error ?? "Failed to submit leave"); return; }
+      const j = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        toast.error(j.error ?? "Failed to submit leave");
+        return;
+      }
       toast.success("Leave request submitted!");
-      setSelectedDate(""); setLeaveReason("");
+      setSelectedDate("");
+      setLeaveReason("");
       await fetchAll();
-    } finally { setActionLoading(false); }
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   // --- Visit rescheduled inline from the leave conflict panel --------------
@@ -599,7 +800,8 @@ export default function LeavePage() {
   // --- Delegate visit -------------------------------------------------------------
   const handleDelegateSubmit = async (visitId: string, toExecId: string) => {
     if (!leaveReason.trim()) {
-      toast.error("Please enter a leave reason first"); return;
+      toast.error("Please enter a leave reason first");
+      return;
     }
     setDelegationSubmitting(true);
     try {
@@ -612,13 +814,26 @@ export default function LeavePage() {
           leaveReason: leaveReason.trim(),
         }),
       });
-      const data = await res.json() as { delegation?: Delegation; error?: string };
-      if (!res.ok) { toast.error(data.error ?? "Failed to send delegation request"); return; }
-      toast.success(`Delegation request sent to ${data.delegation?.toExecutive.name}!`);
-      if (data.delegation) {
-        setExistingDelegations((prev) => ({ ...prev, [visitId]: data.delegation! }));
+      const data = (await res.json()) as {
+        delegation?: Delegation;
+        error?: string;
+      };
+      if (!res.ok) {
+        toast.error(data.error ?? "Failed to send delegation request");
+        return;
       }
-    } finally { setDelegationSubmitting(false); }
+      toast.success(
+        `Delegation request sent to ${data.delegation?.toExecutive.name}!`,
+      );
+      if (data.delegation) {
+        setExistingDelegations((prev) => ({
+          ...prev,
+          [visitId]: data.delegation!,
+        }));
+      }
+    } finally {
+      setDelegationSubmitting(false);
+    }
   };
 
   // --- Respond to incoming delegation (as target exec) -----------------------
@@ -626,7 +841,7 @@ export default function LeavePage() {
     delegationId: string,
     visitId: string,
     action: "ACCEPT" | "REJECT",
-    reason?: string
+    reason?: string,
   ) => {
     setRespondingId(delegationId);
     try {
@@ -635,20 +850,28 @@ export default function LeavePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ delegationId, action, rejectionReason: reason }),
       });
-      const data = await res.json() as { message?: string; error?: string };
-      if (!res.ok) { toast.error(data.error ?? "Failed"); return; }
-      toast.success(action === "ACCEPT" ? "Visit accepted! Visit is now yours." : "Declined.");
+      const data = (await res.json()) as { message?: string; error?: string };
+      if (!res.ok) {
+        toast.error(data.error ?? "Failed");
+        return;
+      }
+      toast.success(
+        action === "ACCEPT"
+          ? "Visit accepted! Visit is now yours."
+          : "Declined.",
+      );
       await fetchAll();
-    } finally { setRespondingId(null); }
+    } finally {
+      setRespondingId(null);
+    }
   };
 
-  const today        = attendance?.today ?? null;
-  const hasPunchedIn  = !!today?.punchIn;
+  const today = attendance?.today ?? null;
+  const hasPunchedIn = !!today?.punchIn;
   const hasPunchedOut = !!today?.punchOut;
 
   return (
     <div className="animate-in space-y-5">
-
       {/* --- Incoming delegation requests (if any) ------------------------------ */}
       {!loading && incomingDelegations.length > 0 && (
         <div className="space-y-3">
@@ -672,7 +895,9 @@ export default function LeavePage() {
       {/* --- Attendance Card ----------------------------------------------------- */}
       <div className="rounded-2xl bg-[#172d58] overflow-hidden shadow-lg">
         <div className="px-5 pt-6 pb-4">
-          <LiveClock punchIn={hasPunchedIn && !hasPunchedOut ? today!.punchIn : null} />
+          <LiveClock
+            punchIn={hasPunchedIn && !hasPunchedOut ? today!.punchIn : null}
+          />
         </div>
         <div className="text-center pb-2">
           {loading ? (
@@ -691,12 +916,20 @@ export default function LeavePage() {
           ) : hasPunchedIn ? (
             <p className="text-sm text-white/70">
               Punched in at {fmtTime(today!.punchIn)}
-              {today!.isLate
-                ? <span className="ml-2 text-amber-300 font-semibold">· Late</span>
-                : <span className="ml-2 text-emerald-300 font-semibold">· On Time</span>}
+              {today!.isLate ? (
+                <span className="ml-2 text-amber-300 font-semibold">
+                  · Late
+                </span>
+              ) : (
+                <span className="ml-2 text-emerald-300 font-semibold">
+                  · On Time
+                </span>
+              )}
             </p>
           ) : (
-            <p className="text-sm text-white/60">Not punched in · {fmtDate(new Date().toISOString())}</p>
+            <p className="text-sm text-white/60">
+              Not punched in · {fmtDate(new Date().toISOString())}
+            </p>
           )}
         </div>
         <div className="flex justify-center pb-5">
@@ -706,14 +939,22 @@ export default function LeavePage() {
               disabled={actionLoading}
               className={cn(
                 "px-8 py-3 rounded-xl font-bold text-sm transition-all press-effect shadow-md",
-                hasPunchedIn ? "bg-[#ff944d] text-white hover:bg-orange-500" : "bg-white text-[#172d58] hover:bg-[#f1f4f9]",
-                actionLoading && "opacity-60 cursor-not-allowed"
+                hasPunchedIn
+                  ? "bg-[#ff944d] text-white hover:bg-orange-500"
+                  : "bg-white text-[#172d58] hover:bg-[#f1f4f9]",
+                actionLoading && "opacity-60 cursor-not-allowed",
               )}
             >
-              {actionLoading ? "…" : hasPunchedIn ? (
-                <span className="flex items-center gap-2"><LogOut className="w-4 h-4" /> Punch Out</span>
+              {actionLoading ? (
+                "…"
+              ) : hasPunchedIn ? (
+                <span className="flex items-center gap-2">
+                  <LogOut className="w-4 h-4" /> Punch Out
+                </span>
               ) : (
-                <span className="flex items-center gap-2"><LogIn className="w-4 h-4" /> Punch In</span>
+                <span className="flex items-center gap-2">
+                  <LogIn className="w-4 h-4" /> Punch In
+                </span>
               )}
             </button>
           )}
@@ -741,19 +982,25 @@ export default function LeavePage() {
         <Modal
           isOpen
           title="Confirm Punch Out"
-          onClose={() => { if (!actionLoading) setShowPunchOutConfirm(false); }}
+          onClose={() => {
+            if (!actionLoading) setShowPunchOutConfirm(false);
+          }}
           size="sm"
         >
           <div className="p-4 space-y-3">
             <p className="text-sm text-[#4a5568]">
-              Please enter a reason for punching out. This note is shared with the admin.
+              Please enter a reason for punching out. This note is shared with
+              the admin.
             </p>
             <label className="text-xs font-semibold text-[#4a5568] block">
               Reason <span className="text-[#c0392b]">*</span>
             </label>
             <textarea
               value={punchOutNotes}
-              onChange={(e) => { setPunchOutNotes(e.target.value); if (punchOutError) setPunchOutError(""); }}
+              onChange={(e) => {
+                setPunchOutNotes(e.target.value);
+                if (punchOutError) setPunchOutError("");
+              }}
               placeholder="e.g. Completed / Accidentally clicked / Extra time worked"
               rows={3}
               maxLength={2000}
@@ -762,7 +1009,9 @@ export default function LeavePage() {
               className="w-full border border-[#e2e7f0] rounded-lg px-3 py-2.5 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30 resize-none disabled:opacity-60"
             />
             {punchOutError && (
-              <p className="text-xs font-semibold text-[#c0392b]">{punchOutError}</p>
+              <p className="text-xs font-semibold text-[#c0392b]">
+                {punchOutError}
+              </p>
             )}
             <div className="flex justify-end gap-2 pt-1">
               <button
@@ -791,13 +1040,20 @@ export default function LeavePage() {
         <div className="bg-white border border-[#e2e7f0] rounded-xl overflow-hidden shadow-sm">
           <div className="px-4 py-3 border-b border-[#f1f4f9] flex items-center gap-2">
             <Clock className="w-4 h-4 text-[#25488e]" />
-            <h2 className="text-sm font-bold text-[#0f1829]">Recent Attendance</h2>
+            <h2 className="text-sm font-bold text-[#0f1829]">
+              Recent Attendance
+            </h2>
           </div>
           <div className="divide-y divide-[#f1f4f9]">
             {attendance!.history.slice(0, 7).map((rec) => (
-              <div key={rec.id} className="flex items-center justify-between px-4 py-3 gap-3">
+              <div
+                key={rec.id}
+                className="flex items-center justify-between px-4 py-3 gap-3"
+              >
                 <div>
-                  <p className="text-xs font-semibold text-[#0f1829]">{fmtDate(rec.date)}</p>
+                  <p className="text-xs font-semibold text-[#0f1829]">
+                    {fmtDate(rec.date)}
+                  </p>
                   <p className="text-[11px] text-[#8896a9] mt-0.5">
                     In: {fmtTime(rec.punchIn)}
                     {rec.punchOut && ` · Out: ${fmtTime(rec.punchOut)}`}
@@ -805,9 +1061,15 @@ export default function LeavePage() {
                 </div>
                 <div className="text-right flex-shrink-0">
                   {rec.workingMinutes != null && (
-                    <p className="text-xs font-bold text-[#0f1829]">{fmtMinutes(rec.workingMinutes)}</p>
+                    <p className="text-xs font-bold text-[#0f1829]">
+                      {fmtMinutes(rec.workingMinutes)}
+                    </p>
                   )}
-                  {rec.isLate && <p className="text-[10px] text-amber-600 font-medium">Late</p>}
+                  {rec.isLate && (
+                    <p className="text-[10px] text-amber-600 font-medium">
+                      Late
+                    </p>
+                  )}
                 </div>
               </div>
             ))}
@@ -826,7 +1088,9 @@ export default function LeavePage() {
             Pick a date — if a visit is planned, you must hand it over first.
           </p>
           <div>
-            <label className="text-xs font-semibold text-[#4a5568] mb-1 block">Leave Date</label>
+            <label className="text-xs font-semibold text-[#4a5568] mb-1 block">
+              Leave Date
+            </label>
             <input
               type="date"
               min={minDate}
@@ -836,11 +1100,49 @@ export default function LeavePage() {
             />
           </div>
 
+          <div>
+            <label className="text-xs font-semibold text-[#4a5568] mb-1 block">
+              Leave Type
+            </label>
+            <select
+              value={leaveType}
+              onChange={(e) =>
+                setLeaveType(e.target.value as "FULL_DAY" | "HALF_DAY")
+              }
+              className="w-full border border-[#e2e7f0] rounded-lg px-3 py-2.5 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30"
+            >
+              <option value="FULL_DAY">Full Day</option>
+              <option value="HALF_DAY">Half Day</option>
+            </select>
+          </div>
+
+          {leaveType === "HALF_DAY" && (
+            <div>
+              <label className="text-xs font-semibold text-[#4a5568] mb-1 block">
+                Half-Day Period
+              </label>
+              <select
+                value={halfDayPeriod}
+                onChange={(e) =>
+                  setHalfDayPeriod(
+                    e.target.value as "FIRST_HALF" | "SECOND_HALF",
+                  )
+                }
+                className="w-full border border-[#e2e7f0] rounded-lg px-3 py-2.5 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30"
+              >
+                <option value="FIRST_HALF">First Half</option>
+                <option value="SECOND_HALF">Second Half</option>
+              </select>
+            </div>
+          )}
+
           {/* Show conflict panel inline when visits conflict */}
           {visitConflict.length > 0 ? (
             <div className="space-y-4">
               <div>
-                <label className="text-xs font-semibold text-[#4a5568] mb-1 block">Reason for leave</label>
+                <label className="text-xs font-semibold text-[#4a5568] mb-1 block">
+                  Reason for leave
+                </label>
                 <textarea
                   value={leaveReason}
                   onChange={(e) => setLeaveReason(e.target.value)}
@@ -859,7 +1161,9 @@ export default function LeavePage() {
                     leaveDate={selectedDate}
                     leaveReason={leaveReason}
                     executives={executives}
-                    existingDelegation={existingDelegations[conflict.id] ?? null}
+                    existingDelegation={
+                      existingDelegations[conflict.id] ?? null
+                    }
                     onDelegateSubmit={handleDelegateSubmit}
                     onDelegateSuccess={fetchAll}
                     onRescheduled={handleVisitRescheduled}
@@ -872,7 +1176,9 @@ export default function LeavePage() {
           ) : (
             <>
               <div>
-                <label className="text-xs font-semibold text-[#4a5568] mb-1 block">Reason</label>
+                <label className="text-xs font-semibold text-[#4a5568] mb-1 block">
+                  Reason
+                </label>
                 <textarea
                   value={leaveReason}
                   onChange={(e) => setLeaveReason(e.target.value)}
@@ -897,18 +1203,26 @@ export default function LeavePage() {
       {!loading && (leavesData?.leaves?.length ?? 0) > 0 && (
         <div className="bg-white border border-[#e2e7f0] rounded-xl overflow-hidden shadow-sm">
           <div className="px-4 py-3 border-b border-[#f1f4f9]">
-            <h2 className="text-sm font-bold text-[#0f1829]">My Leave Requests</h2>
+            <h2 className="text-sm font-bold text-[#0f1829]">
+              My Leave Requests
+            </h2>
           </div>
           <div className="divide-y divide-[#f1f4f9]">
             {leavesData!.leaves.map((leave) => (
               <div key={leave.id} className="px-4 py-3">
                 <div className="flex items-center justify-between gap-2 mb-1">
-                  <p className="text-sm font-semibold text-[#0f1829]">{fmtDateShort(leave.date)}</p>
+                  <p className="text-sm font-semibold text-[#0f1829]">
+                    {fmtDateShort(leave.date)}
+                  </p>
                   <LeaveStatusBadge status={leave.status} />
                 </div>
-                <p className="text-xs text-[#8896a9] truncate">{leave.reason}</p>
+                <p className="text-xs text-[#8896a9] truncate">
+                  {leave.reason}
+                </p>
                 {leave.adminComment && (
-                  <p className="text-xs text-[#4a5568] mt-1 italic">Admin: {leave.adminComment}</p>
+                  <p className="text-xs text-[#4a5568] mt-1 italic">
+                    Admin: {leave.adminComment}
+                  </p>
                 )}
               </div>
             ))}
@@ -917,7 +1231,10 @@ export default function LeavePage() {
       )}
 
       {/* -- Footer link -- */}
-      <a href="/executive/visits" className="flex items-center justify-center gap-1.5 text-xs font-semibold text-[#25488e] pb-2">
+      <a
+        href="/executive/visits"
+        className="flex items-center justify-center gap-1.5 text-xs font-semibold text-[#25488e] pb-2"
+      >
         View My Visits <ChevronRight className="w-3.5 h-3.5" />
       </a>
     </div>
