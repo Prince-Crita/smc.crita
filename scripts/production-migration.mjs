@@ -30,7 +30,7 @@
  */
 import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
-import { dirname, join } from "path";
+import { dirname, join, relative } from "path";
 import { fileURLToPath } from "url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -88,7 +88,7 @@ if (mode === "apply" && process.env.CONFIRM_PRODUCTION_MIGRATION !== "yes") {
   console.error(`  Target: host=${shortHost} db=${target.db} user=${target.user}`);
   console.error("");
   console.error("  If that is the database you mean, re-run with:");
-  console.error("    CONFIRM_PRODUCTION_MIGRATION=yes node scripts/production-migration.mjs apply");
+  console.error(`    CONFIRM_PRODUCTION_MIGRATION=yes node ${relative(process.cwd(), process.argv[1]).replace(/\\/g, "/")} apply`);
   console.error("");
   process.exit(2);
 }

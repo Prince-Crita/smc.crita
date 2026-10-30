@@ -7,8 +7,20 @@ import {
 
 export { APP_BASE_PATH, PUBLIC_APP_ORIGIN, PUBLIC_APP_URL };
 
-/** The configured mount point ("" when the app is served from the domain root). */
-export const BASE_PATH = resolveBasePath();
+/**
+ * The configured mount point ("" when the app is served from the domain root).
+ *
+ * Read through LITERAL `process.env.X` expressions: Next.js inlines those at
+ * build time into the browser and server bundles. Passing the process.env
+ * object itself (resolveBasePath()'s default) is not inlined — the browser
+ * then saw an empty env, BASE_PATH was "", and on the company server every
+ * browser-side fetch("/api/...") and favicon link missed the mount point.
+ */
+export const BASE_PATH = resolveBasePath({
+  NODE_ENV: process.env.NODE_ENV,
+  NEXT_PUBLIC_BASE_PATH: process.env.NEXT_PUBLIC_BASE_PATH,
+  BUILD_STANDALONE: process.env.BUILD_STANDALONE,
+});
 
 /**
  * Resolve a path in /public for the mount point the app is served from.
