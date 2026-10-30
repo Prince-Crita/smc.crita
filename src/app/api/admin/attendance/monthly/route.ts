@@ -2,7 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { isAdminRole } from "@/lib/auth/roles";
 import { prisma } from "@/lib/db/prisma";
-import { toMidnightIST } from "@/lib/utils/attendance";
+import { toMidnightIST, istDateString } from "@/lib/utils/attendance";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Sunday is a non-working day (Phase 2, requirement 8). The weekday is read
+// from the IST calendar date ("YYYY-MM-DD") itself. It must NOT be read with
+// getUTCDay() from a toMidnightIST() value: that instant is 18:30 UTC of the
+// PREVIOUS date, so its UTC weekday is one day behind (Monday would be taken
+// for Sunday).
+const isSundayIST = (ymd: string) => new Date(`${ymd}T12:00:00Z`).getUTCDay() === 0;
 
 // ─── GET /api/admin/attendance/monthly ─────────────────────────────────────
 // Query params: month (YYYY-MM, required), executiveId (optional)
@@ -43,21 +52,15 @@ export async function GET(request: NextRequest) {
         ? nextMonthStart
         : new Date(todayIST.getTime() + 24 * 60 * 60 * 1000);
 
-    const totalWorkingDays = (() => {
-      let count = 0;
-      const current = new Date(monthStart);
-
-      while (current < effectiveEnd) {
-        // getUTCDay(): Sunday = 0
-        if (current.getUTCDay() !== 0) {
-          count++;
-        }
-
-        current.setUTCDate(current.getUTCDate() + 1);
-      }
-
-      return count;
-    })();
+    // Every IST calendar day of the month up to today, as "YYYY-MM-DD".
+    // Attendance rows (IST midnight) and leave rows (UTC midnight) both map
+    // onto these keys through istDateString, so each lands on its own day.
+    const days: string[] = [];
+    for (let d = new Date(monthStart); d < effectiveEnd; d = new Date(d.getTime() + DAY_MS)) {
+      days.push(istDateString(d));
+    }
+    const workingDays = days.filter((d) => !isSundayIST(d));
+    const totalWorkingDays = workingDays.length;
 
     const executives = await prisma.user.findMany({
       where: { role: "EXECUTIVE", ...(execId ? { id: execId } : {}) },
@@ -90,14 +93,18 @@ export async function GET(request: NextRequest) {
       const presentCount = execAttendance.length;
       const lateCount = execAttendance.filter((r) => r.isLate).length;
       const leaveCount = execLeave.length;
-      const absentCount = Math.max(
-        0,
-        totalWorkingDays - presentCount - leaveCount,
-      );
+      // Absent = a WORKING day with neither a punch-in nor an approved leave,
+      // decided day by day. Subtracting totals instead let a Sunday punch-in,
+      // or a half-day leave on a day the executive also punched in, cancel
+      // out a real absence elsewhere in the month.
+      const presentDays = new Set(execAttendance.map((r) => istDateString(r.date)));
+      const leaveDays = new Set(execLeave.map((r) => istDateString(r.date)));
+      const absentCount = workingDays.filter((d) => !presentDays.has(d) && !leaveDays.has(d)).length;
+      const presentOnWorkingDays = workingDays.filter((d) => presentDays.has(d)).length;
       const attendancePercentage =
         totalWorkingDays === 0
           ? 0
-          : Math.round((presentCount / totalWorkingDays) * 100);
+          : Math.round((presentOnWorkingDays / totalWorkingDays) * 100);
 
       return {
         executiveId: exec.id,
@@ -115,7 +122,7 @@ export async function GET(request: NextRequest) {
     // Day-by-day breakdown — only meaningful when a single executive is selected
     const daily: {
       date: string;
-      status: "PRESENT" | "ABSENT" | "LEAVE";
+      status: "PRESENT" | "ABSENT" | "LEAVE" | "SUNDAY";
       punchIn: string | null;
       punchOut: string | null;
       isLate: boolean;
@@ -123,23 +130,19 @@ export async function GET(request: NextRequest) {
 
     if (execId) {
       const leaveDateKeys = new Set(
-        leaveRecords.map((r) => r.date.toISOString().slice(0, 10)),
+        leaveRecords.map((r) => istDateString(r.date)),
       );
       const attendanceByDate = new Map(
-        attendanceRecords.map((r) => [r.date.toISOString().slice(0, 10), r]),
+        attendanceRecords.map((r) => [istDateString(r.date), r]),
       );
 
-      for (
-        let d = new Date(monthStart);
-        d < effectiveEnd;
-        d = new Date(d.getTime() + 24 * 60 * 60 * 1000)
-      ) {
-        const key = d.toISOString().slice(0, 10);
+      for (const key of days) {
         const rec = attendanceByDate.get(key);
         const onLeave = leaveDateKeys.has(key);
         daily.push({
           date: key,
-          status: rec ? "PRESENT" : onLeave ? "LEAVE" : "ABSENT",
+          // A Sunday is never Absent; a punch-in or leave on it still shows.
+          status: rec ? "PRESENT" : onLeave ? "LEAVE" : isSundayIST(key) ? "SUNDAY" : "ABSENT",
           punchIn: rec?.punchIn.toISOString() ?? null,
           punchOut: rec?.punchOut?.toISOString() ?? null,
           isLate: rec?.isLate ?? false,

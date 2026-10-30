@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth/middleware";
 import { prisma } from "@/lib/db/prisma";
-import { toMidnightIST } from "@/lib/utils/attendance";
+import { toMidnightIST, isLatePunchIn } from "@/lib/utils/attendance";
 
 // ─── GET /api/attendance ────────────────────────────────────────────────────
 // Returns: today's record, last 30 days history, punch streak
@@ -78,43 +78,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ── Late / On-Time (P7) ────────────────────────────────────────────────
-    // The threshold is based on the executive's ASSIGNED VISIT TIME for the
-    // day, not a fixed clock time: punching in within 30 minutes of the
-    // earliest scheduled visit is On Time; more than 30 minutes after it is
-    // Late. Previously a fixed 10:00 IST cutoff marked almost everyone Late
-    // regardless of when their visit actually started.
-    // const dayEnd = new Date(today.getTime() + 24 * 60 * 60 * 1000);
-    // const firstVisit = await prisma.visit.findFirst({
-    //   where: {
-    //     executiveId: user.userId,
-    //     scheduledDate: { gte: today, lt: dayEnd },
-    //     status: { in: ["PENDING", "OPEN"] },
-    //   },
-    //   orderBy: { scheduledDate: "asc" },
-    //   select: { scheduledDate: true },
-    // });
-
-    // const LATE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
-    // let isLate: boolean;
-    // if (firstVisit) {
-    //   isLate = now.getTime() > firstVisit.scheduledDate.getTime() + LATE_THRESHOLD_MS;
-    // } else {
-    //   // No visit assigned today - fall back to the office norm:
-    //   // 10:00 IST + the same 30-minute grace (i.e. late after 10:30 IST).
-    //   const minutesUTC = now.getUTCHours() * 60 + now.getUTCMinutes();
-    //   isLate = minutesUTC > 4 * 60 + 30 + 30; // 10:30 IST = 05:00 UTC
-    // }
-
-    // ── Late / On-Time ────────────────────────────────────────────────────
-    // Fixed working-time rule:
-    // 10:00 AM to 7:30 PM IST = On Time
-    // After 7:30 PM IST = Late
-
-    const minutesIST =
-      (now.getUTCHours() * 60 + now.getUTCMinutes() + 330) % 1440;
-
-    const isLate = minutesIST > 19 * 60 + 30;
+    // ── Late / On-Time (Phase 2, requirement 9) ────────────────────────────
+    // Fixed working-time rule, in IST: a punch-in up to 7:30 PM is On Time,
+    // after 7:30 PM is Late. Stored once at punch-in; every screen shows it.
+    const isLate = isLatePunchIn(now);
 
     const record = await prisma.attendance.create({
       data: {

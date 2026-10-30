@@ -34,6 +34,19 @@ export function istDateString(d: Date = new Date()): string {
   return shifted.toISOString().split("T")[0];
 }
 
+/**
+ * Attendance status of a punch-in (Phase 2, requirement 9), in IST:
+ *   10:00 AM – 7:30 PM  → On Time
+ *   after 7:30 PM       → Late
+ * A punch-in before 10:00 AM is early, not late, so it is On Time as well.
+ * Judged to the minute: 7:30 PM itself is On Time, 7:31 PM is Late.
+ */
+export function isLatePunchIn(d: Date): boolean {
+  const shifted = new Date(d.getTime() + IST_OFFSET_MS);
+  const minutesIST = shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
+  return minutesIST > 19 * 60 + 30;
+}
+
 export function toMidnightIST(d: Date): Date {
   const shifted = new Date(d.getTime() + IST_OFFSET_MS);
   const istMidnightAsUTC = Date.UTC(

@@ -441,7 +441,7 @@ interface MonthlySummaryRow {
 }
 interface DailyRow {
   date: string;
-  status: "PRESENT" | "ABSENT" | "LEAVE";
+  status: "PRESENT" | "ABSENT" | "LEAVE" | "SUNDAY";
   punchIn: string | null;
   punchOut: string | null;
   isLate: boolean;
@@ -651,6 +651,8 @@ function MonthlyAttendanceView() {
                               : "bg-green-50 text-green-700 border-green-200"
                             : d.status === "LEAVE"
                             ? "bg-[#eef2fb] text-[#25488e] border-[#d4ddf5]"
+                            : d.status === "SUNDAY"
+                            ? "bg-[#f1f4f9] text-[#8896a9] border-[#e2e7f0]"
                             : "bg-red-50 text-red-700 border-red-200",
                         )}
                       >
