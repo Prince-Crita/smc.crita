@@ -244,7 +244,10 @@ const manifest = {
     "@prisma/adapter-pg": v("@prisma/adapter-pg"), pg: v("pg"),
   },
   package: { files: size.files, bytes: size.total },
-  requiredEnvAtRuntime: ["DATABASE_URL", "JWT_SECRET", "NODE_ENV=production", "PORT", "HOSTNAME"],
+  requiredEnvAtRuntime: [
+    "DATABASE_URL", "JWT_SECRET", "NODE_ENV=production", "PORT", "HOSTNAME",
+    "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION", "AWS_S3_BUCKET",
+  ],
   optionalEnvAtRuntime: ["RESEND_API_KEY", "RESEND_FROM_EMAIL", "ADMIN_EMAIL", "JWT_EXPIRES_IN"],
 };
 writeFileSync(join(outDir, "BUILD-INFO.json"), JSON.stringify(manifest, null, 2) + "\n");

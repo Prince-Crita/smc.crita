@@ -9,12 +9,16 @@
  *       row counts. Safe to run at any time, before or after the migration.
  *
  *   node scripts/production-migration.mjs apply
- *       Applies prisma/sql/2026-08-21-production-migration.sql. Refuses to run
+ *       Applies every file in MIGRATION_FILES, in order. Refuses to run
  *       unless CONFIRM_PRODUCTION_MIGRATION=yes is set, so it cannot happen by
- *       accident. The SQL is one transaction: it either completes or changes
- *       nothing. It is additive only — no DROP, TRUNCATE, DELETE, UPDATE,
- *       INSERT, ALTER COLUMN, RENAME or SET NOT NULL — and it is idempotent,
- *       so re-running it is safe.
+ *       accident. Each file is one transaction: it either completes or changes
+ *       nothing. All are additive only — no DROP, TRUNCATE, DELETE, UPDATE,
+ *       INSERT, ALTER COLUMN, RENAME or SET NOT NULL — and idempotent, so
+ *       re-running them (or running them on a database that already has some
+ *       of them) is safe.
+ *
+ * Runs from the repository (SQL in prisma/sql/) or from the deployment
+ * package (SQL in database/sql/, `pg` taken from app/node_modules).
  *
  * The connection string must be supplied explicitly, so there is no way to run
  * this against the wrong database by leaving a file lying around:
@@ -24,10 +28,34 @@
  * Take a Neon branch or backup before applying. Nothing here can restore data,
  * because nothing here removes any.
  */
-import { readFileSync } from "fs";
-import pg from "pg";
+import { existsSync, readFileSync } from "fs";
+import { createRequire } from "module";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 
-const MIGRATION_FILE = "prisma/sql/2026-08-21-production-migration.sql";
+const here = dirname(fileURLToPath(import.meta.url));
+
+// Release migrations, in the order they must run. Each is additive and
+// idempotent; a database that already has some of them is simply topped up.
+const MIGRATION_FILES = [
+  "2026-08-21-production-migration.sql",  // team visits, admin-approved carry-forward, indexes
+  "2026-10-24-visit-task-selection.sql",  // visits.selectedTaskTypes
+  "2026-10-30-visit-subtask-selection.sql", // visits.selectedSubtaskTemplateIds
+  "2026-10-30-leave-half-day.sql",        // LeaveType, HalfDayPeriod, leave_requests columns
+  "2026-10-31-visit-photos.sql",          // visit_photos
+];
+const SQL_DIR = [join(here, "sql"), join(here, "..", "prisma", "sql")].find((d) => existsSync(d));
+
+// `pg` from the repository's node_modules, or from the deployment package's app.
+function loadPg() {
+  for (const from of [import.meta.url, join(here, "..", "app", "server.js")]) {
+    try { return createRequire(from)("pg"); } catch { /* try the next location */ }
+  }
+  console.error("Cannot find the 'pg' module (expected in node_modules or app/node_modules).");
+  process.exit(2);
+}
+const pg = loadPg();
+
 const mode = (process.argv[2] || "check").toLowerCase();
 
 if (!["check", "apply"].includes(mode)) {
@@ -66,14 +94,18 @@ if (mode === "apply" && process.env.CONFIRM_PRODUCTION_MIGRATION !== "yes") {
 }
 
 const REQUIRED = {
-  tables: ["visit_assignments", "admin_operations"],
-  enums: ["VisitType", "VisitRole"],
+  tables: ["visit_assignments", "admin_operations", "visit_photos"],
+  enums: ["VisitType", "VisitRole", "LeaveType", "HalfDayPeriod"],
   columns: [
     ["visits", "visitType"],
     ["subtasks", "carryForwardRequestedAt"],
     ["subtasks", "carryForwardApprovedAt"],
     ["subtasks", "carryForwardApprovedById"],
     ["subtasks", "carryForwardRejectedAt"],
+    ["visits", "selectedTaskTypes"],
+    ["visits", "selectedSubtaskTemplateIds"],
+    ["leave_requests", "leaveType"],
+    ["leave_requests", "halfDayPeriod"],
   ],
   indexes: [
     "visits_clientId_idx", "visits_executiveId_idx", "visits_scheduledDate_idx",
@@ -84,6 +116,7 @@ const REQUIRED = {
     "activity_logs_userId_createdAt_idx", "activity_logs_action_createdAt_idx",
     "visit_delegations_visitId_idx", "visit_delegations_toExecutiveId_status_idx",
     "admin_operations_createdAt_idx", "visit_assignments_visitId_executiveId_key",
+    "visit_photos_s3Key_key", "visit_photos_visitId_idx",
   ],
 };
 
@@ -134,6 +167,14 @@ async function report(q) {
     const [{ c }] = await q(`select count(*)::int c from admin_operations`);
     console.log(`  admin_operations rows:  ${c}  (0 expected immediately after migration)`);
   }
+  if (cols.has("leave_requests.leaveType")) {
+    const rows = await q(`select "leaveType", count(*)::int c from leave_requests group by 1 order by 1`);
+    console.log(`  leave requests by type: ${rows.map((r) => `${r.leaveType}=${r.c}`).join(", ") || "(none)"}  (all FULL_DAY right after migration)`);
+  }
+  if (tables.includes("visit_photos")) {
+    const [{ c }] = await q(`select count(*)::int c from visit_photos`);
+    console.log(`  visit_photos rows:      ${c}  (0 expected immediately after migration)`);
+  }
   return missing;
 }
 
@@ -149,18 +190,24 @@ async function main() {
     await client.query("ROLLBACK");
     console.log(missing === 0
       ? "\nRESULT: the database already has everything this release needs."
-      : `\nRESULT: ${missing} required object(s) missing — apply ${MIGRATION_FILE} before deploying.`);
+      : `\nRESULT: ${missing} required object(s) missing — run "apply" before deploying.`);
     await client.end();
     process.exit(0);
   }
 
   // apply
   console.log("mode:   APPLY");
-  const sql = readFileSync(MIGRATION_FILE, "utf8");
-  console.log(`running ${MIGRATION_FILE} …`);
-  const t0 = Date.now();
-  await client.query(sql); // the file carries its own BEGIN/COMMIT
-  console.log(`done in ${Date.now() - t0}ms\n`);
+  if (!SQL_DIR) throw new Error("migration SQL folder not found (expected sql/ next to this script, or prisma/sql/)");
+  for (const name of MIGRATION_FILES) {
+    const file = join(SQL_DIR, name);
+    if (!existsSync(file)) throw new Error(`missing migration file ${name} — nothing after it was applied`);
+    const sql = readFileSync(file, "utf8");
+    process.stdout.write(`running ${name} … `);
+    const t0 = Date.now();
+    await client.query(sql); // each file carries its own BEGIN/COMMIT
+    console.log(`done in ${Date.now() - t0}ms`);
+  }
+  console.log("");
 
   console.log("Verifying:");
   const missing = await report(q);
@@ -173,7 +220,8 @@ async function main() {
 
 main().catch(async (err) => {
   console.error("\nFAILED:", err.message);
-  console.error("The migration runs in a single transaction, so if it failed the database is unchanged.");
+  console.error("Each migration file runs in its own transaction: files reported \"done\" are applied,");
+  console.error("the failing file changed nothing, and later files were not run. Re-running is safe.");
   try { await client.end(); } catch {}
   process.exit(1);
 });
