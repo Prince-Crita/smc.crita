@@ -6,7 +6,12 @@ import { sortVisitsForDisplay } from "@/lib/utils/visit-status";
 import { getVisitSubtaskCounts, totalsForVisit } from "@/lib/utils/visit-aggregates";
 import { getApprovedLeave } from "@/lib/utils/leave-check";
 import { isCarryForwardVisit } from "@/lib/utils/carry-forward";
-import { resolveClientTaskPlan, createTasksWithSubtasks } from "@/lib/utils/create-visit";
+import {
+  resolveClientTaskPlan,
+  createTasksWithSubtasks,
+  applyTaskSelection,
+  MONTHLY_TASK_TYPES,
+} from "@/lib/utils/create-visit";
 import { normalizeAssignment } from "@/lib/utils/visit-assignment";
 import { executiveVisitScope } from "@/lib/utils/visit-access";
 
@@ -43,6 +48,27 @@ export async function GET(request: NextRequest) {
         }),
       ]);
       return NextResponse.json({ visits: [], clients, executives, stats: { total: 0, pending: 0, inProgress: 0, closed: 0 } });
+    }
+
+    // ?taskPlanFor=<clientId> → the tasks Create Visit offers for that client:
+    // exactly the task plan a new visit would be scaffolded from (the
+    // client's current Task Configuration — renames, order, removed types and
+    // client-specific > global subtask templates all applied), so what the
+    // admin ticks is precisely what gets created. Read-only.
+    const taskPlanFor = searchParams.get("taskPlanFor");
+    if (taskPlanFor) {
+      const client = await prisma.client.findUnique({ where: { id: taskPlanFor }, select: { id: true } });
+      if (!client) return NextResponse.json({ error: "Client not found" }, { status: 404 });
+      const plan = await resolveClientTaskPlan(taskPlanFor);
+      return NextResponse.json({
+        tasks: plan.map((entry) => ({
+          type: entry.type,
+          title: entry.title,
+          orderIndex: entry.orderIndex,
+          subtaskCount: entry.subtaskTitles.length,
+          isMonthly: MONTHLY_TASK_TYPES.has(entry.type),
+        })),
+      });
     }
 
     const where: Record<string, unknown> = {};
@@ -163,6 +189,10 @@ export async function POST(request: NextRequest) {
       // single-executive behaviour, so existing callers are unaffected).
       visitType?: "SOLO" | "TEAM";
       memberIds?: string[];
+      // Per-visit task selection (optional). Omitted → the visit receives
+      // the client's full Task Configuration, exactly as before. Present →
+      // only these task types are created on this visit.
+      selectedTaskTypes?: unknown;
     };
 
     const { clientId, executiveId, scheduledDate, endDate, notes } = body;
@@ -236,7 +266,39 @@ export async function POST(request: NextRequest) {
     // admin never has to recreate tasks for a returning client. Resolved
     // BEFORE the transaction — it only reads the client's configuration and
     // does not depend on the visit — so the transaction stays short.
-    const plan = await resolveClientTaskPlan(clientId);
+    const fullPlan = await resolveClientTaskPlan(clientId);
+
+    // Per-visit task selection. Only the ticked task types are created on
+    // this visit, and the selection is stored on the visit so the automatic
+    // sync/top-up paths (Task Configuration changes, reassignment, team
+    // changes) never add an unticked task back. The client's Task
+    // Configuration itself is not modified.
+    let selectedTaskTypes: string[] = [];
+    if (body.selectedTaskTypes !== undefined) {
+      if (
+        !Array.isArray(body.selectedTaskTypes) ||
+        body.selectedTaskTypes.some((t) => typeof t !== "string" || !t.trim())
+      ) {
+        return NextResponse.json({ error: "selectedTaskTypes must be a list of task types" }, { status: 400 });
+      }
+      const requested = new Set(body.selectedTaskTypes as string[]);
+      const chosen = fullPlan.filter((entry) => requested.has(entry.type));
+      if (chosen.length === 0) {
+        return NextResponse.json({ error: "Select at least one task for this visit" }, { status: 400 });
+      }
+      if (chosen.length !== requested.size) {
+        // A ticked task is no longer in the client's configuration (it was
+        // removed while the form was open). Refuse rather than silently
+        // creating a visit with fewer tasks than the admin saw.
+        return NextResponse.json(
+          { error: "One or more selected tasks are no longer in this client's Task Configuration. Re-select the client to refresh its task list." },
+          { status: 400 }
+        );
+      }
+      // Stored in the client's configured order.
+      selectedTaskTypes = chosen.map((entry) => entry.type);
+    }
+    const plan = applyTaskSelection(fullPlan, selectedTaskTypes);
 
     // Visit, team rows and the configured task structure are committed
     // TOGETHER. Previously the tasks were written after the visit had already
@@ -254,6 +316,7 @@ export async function POST(request: NextRequest) {
           endDate: endAt,
           notes: notes?.trim() || null,
           status: "PENDING",
+          selectedTaskTypes,
           // Team rows are created alongside the visit so a TEAM visit is never
           // briefly visible without its members.
           ...(team.visitType === "TEAM" && {
@@ -281,7 +344,12 @@ export async function POST(request: NextRequest) {
         visitId: visit.id,
         userId: user.userId,
         action: "VISIT_CREATED",
-        metadata: { visitNumber, by: user.name },
+        metadata: {
+          visitNumber,
+          by: user.name,
+          taskCount: plan.length,
+          ...(selectedTaskTypes.length > 0 && { selectedTaskTypes }),
+        },
       },
     });
 

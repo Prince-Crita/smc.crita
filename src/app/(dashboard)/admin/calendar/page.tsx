@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, memo } from "react";
+import { useState, useEffect, useCallback, useRef, memo } from "react";
 import {
   ChevronLeft, ChevronRight, Plus, RotateCcw, Building2,
   Users, CalendarDays, AlertCircle, CheckCircle2,
@@ -9,6 +9,7 @@ import { cn, formatDate } from "@/lib/utils/utils";
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SkeletonCard } from "@/components/ui/Skeleton";
+import { WeekTaskHistory } from "@/components/calendar/WeekTaskHistory";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import { useLiveQuery, fetchJSON, revalidateAll } from "@/lib/hooks/useLiveQuery";
@@ -44,6 +45,15 @@ interface CalendarData {
 
 interface Executive { id: string; name: string; email: string }
 interface Client    { id: string; name: string; code: string }
+
+/** One task Create Visit offers for the selected client (its Task Configuration). */
+interface PlanTask {
+  type: string;
+  title: string;
+  orderIndex: number;
+  subtaskCount: number;
+  isMonthly: boolean;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function prevMonday(iso: string): string {
@@ -89,9 +99,61 @@ function CreateVisitModal({ prefillDate, clients, executives, onClose, onCreated
   const [visitType, setVisitType]     = useState<"SOLO" | "TEAM">("SOLO");
   const [memberIds, setMemberIds]     = useState<string[]>([]);
 
+  // ── Tasks for THIS visit ───────────────────────────────────────────────────
+  // Loaded from the selected client's Task Configuration. Only the ticked
+  // tasks are created on the visit; the configuration itself is not changed.
+  // Regular tasks start ticked, monthly tasks start unticked — the admin
+  // includes a monthly task in a visit explicitly.
+  const [planTasks, setPlanTasks]     = useState<PlanTask[] | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError]     = useState("");
+  const [selectedTaskTypes, setSelectedTaskTypes] = useState<string[]>([]);
+  // Only the most recent client's response is applied, so quickly switching
+  // clients can never show (or submit) another client's task list.
+  const planRequestRef = useRef(0);
+
+  const loadTaskPlan = useCallback(async (id: string) => {
+    const requestId = ++planRequestRef.current;
+    setPlanTasks(null);
+    setSelectedTaskTypes([]);
+    setPlanError("");
+    if (!id) { setPlanLoading(false); return; }
+    setPlanLoading(true);
+    try {
+      const { tasks } = await fetchJSON<{ tasks: PlanTask[] }>(
+        `/api/admin/visits?taskPlanFor=${encodeURIComponent(id)}`
+      );
+      if (requestId !== planRequestRef.current) return;
+      setPlanTasks(tasks);
+      setSelectedTaskTypes(tasks.filter((t) => !t.isMonthly).map((t) => t.type));
+    } catch (err) {
+      if (requestId !== planRequestRef.current) return;
+      setPlanError(err instanceof Error ? err.message : "Could not load this client's tasks");
+    } finally {
+      if (requestId === planRequestRef.current) setPlanLoading(false);
+    }
+  }, []);
+
+  const toggleTask = (type: string) =>
+    setSelectedTaskTypes((prev) => prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]);
+
+  const hasTaskPlan = !!planTasks && planTasks.length > 0;
+
   const handleSubmit = async () => {
     if (!clientId || !executiveId || !scheduledDate) {
       toast.error("Please fill all required fields");
+      return;
+    }
+    if (planLoading) {
+      toast.error("Loading this client's tasks — please wait a moment");
+      return;
+    }
+    if (planError) {
+      toast.error("This client's tasks could not be loaded. Retry before creating the visit.");
+      return;
+    }
+    if (hasTaskPlan && selectedTaskTypes.length === 0) {
+      toast.error("Select at least one task for this visit");
       return;
     }
     if (visitType === "TEAM" && memberIds.length === 0) {
@@ -102,6 +164,10 @@ function CreateVisitModal({ prefillDate, clients, executives, onClose, onCreated
       toast.error("End date cannot be before the start date");
       return;
     }
+    // Sent in the client's configured order.
+    const orderedSelection = hasTaskPlan
+      ? planTasks!.filter((t) => selectedTaskTypes.includes(t.type)).map((t) => t.type)
+      : [];
     setSubmitting(true);
     try {
       const res = await fetch("/api/admin/visits", {
@@ -110,6 +176,9 @@ function CreateVisitModal({ prefillDate, clients, executives, onClose, onCreated
         body: JSON.stringify({
           clientId, executiveId, scheduledDate, ...(endDate ? { endDate } : {}), notes,
           visitType, ...(visitType === "TEAM" ? { memberIds } : {}),
+          // Omitted only when the client has no configured tasks at all, which
+          // keeps that case exactly as it was.
+          ...(hasTaskPlan ? { selectedTaskTypes: orderedSelection } : {}),
         }),
       });
       const json = await res.json() as { error?: string; code?: string };
@@ -150,12 +219,86 @@ function CreateVisitModal({ prefillDate, clients, executives, onClose, onCreated
         </div>
         <div>
           <label className="text-xs font-semibold text-[#4a5568] mb-1 block">Client <span className="text-red-500">*</span></label>
-          <select value={clientId} onChange={(e) => setClientId(e.target.value)}
+          <select value={clientId} onChange={(e) => { setClientId(e.target.value); void loadTaskPlan(e.target.value); }}
             className="w-full border border-[#e2e7f0] rounded-lg px-3 py-2 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30">
             <option value="">Select a client…</option>
             {clients.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
           </select>
         </div>
+        {/* Tasks for this visit — shown once a client is chosen. */}
+        {clientId && (
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-semibold text-[#4a5568] block">
+                Tasks for this Visit {hasTaskPlan && <span className="text-red-500">*</span>}
+              </label>
+              {hasTaskPlan && (
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold">
+                  <button type="button" onClick={() => setSelectedTaskTypes(planTasks!.map((t) => t.type))}
+                    className="text-[#25488e] hover:underline">
+                    Select all
+                  </button>
+                  <span className="text-[#c8d2e0]">·</span>
+                  <button type="button" onClick={() => setSelectedTaskTypes([])}
+                    className="text-[#8896a9] hover:underline">
+                    Clear
+                  </button>
+                </div>
+              )}
+            </div>
+            {planLoading ? (
+              <p className="border border-[#e2e7f0] rounded-lg px-3 py-2.5 text-xs text-[#8896a9]">
+                Loading this client&apos;s tasks…
+              </p>
+            ) : planError ? (
+              <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-xs text-red-800">Could not load this client&apos;s tasks.</p>
+                  <button type="button" onClick={() => void loadTaskPlan(clientId)}
+                    className="text-xs font-semibold text-red-700 hover:underline mt-0.5">
+                    Retry
+                  </button>
+                </div>
+              </div>
+            ) : planTasks && planTasks.length === 0 ? (
+              <p className="border border-[#e2e7f0] rounded-lg px-3 py-2.5 text-xs text-[#8896a9]">
+                This client has no tasks in Task Configuration, so the visit will be created without tasks.
+              </p>
+            ) : hasTaskPlan ? (
+              <>
+                <div className="border border-[#e2e7f0] rounded-lg divide-y divide-[#f1f4f9] max-h-52 overflow-y-auto">
+                  {planTasks!.map((t) => {
+                    const checked = selectedTaskTypes.includes(t.type);
+                    return (
+                      <label key={t.type} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[#f8fafc]">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleTask(t.type)}
+                          className="w-4 h-4 accent-[#25488e] flex-shrink-0"
+                        />
+                        <span className="flex-1 min-w-0 text-sm text-[#0f1829] truncate">{t.title}</span>
+                        {t.isMonthly && (
+                          <span className="flex-shrink-0 text-[10px] font-bold text-[#800040] bg-[#800040]/10 px-1.5 py-0.5 rounded-full">
+                            Monthly
+                          </span>
+                        )}
+                        <span className="flex-shrink-0 text-[11px] text-[#8896a9] tabular-nums">
+                          {t.subtaskCount} subtask{t.subtaskCount === 1 ? "" : "s"}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-[#8896a9] mt-1">
+                  {selectedTaskTypes.length} of {planTasks!.length} selected. Only ticked tasks are added to this visit —
+                  monthly tasks are included only when ticked. The client&apos;s Task Configuration is not changed.
+                </p>
+              </>
+            ) : null}
+          </div>
+        )}
         {/* Visit Type — chosen first; it decides whether one executive or a
             team is assigned below. */}
         <div>
@@ -457,6 +600,8 @@ export default function AdminCalendarPage() {
   const [execFilter, setExecFilter] = useState("");
   const [executives, setExecutives] = useState<Executive[]>([]);
   const [clients, setClients]       = useState<Client[]>([]);
+  // Calendar grid, or the same week's Task History (task/subtask level).
+  const [view, setView]             = useState<"calendar" | "history">("calendar");
 
   // Modal state
   const [showCreate, setShowCreate]           = useState(false);
@@ -601,7 +746,11 @@ export default function AdminCalendarPage() {
             <h1 className="text-xl font-bold text-[#0f1829]">
               {loading ? "Calendar" : `Week ${data?.weekNumber} · ${data?.monthLabel}`}
             </h1>
-            <p className="text-xs text-[#8896a9]">Click Visit to open · Reschedule to move · + to add</p>
+            <p className="text-xs text-[#8896a9]">
+              {view === "calendar"
+                ? "Click Visit to open · Reschedule to move · + to add"
+                : "Tasks and subtasks of this week's visits"}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -627,13 +776,35 @@ export default function AdminCalendarPage() {
         </div>
       </div>
 
-      {/* ── Legend ── */}
-      <div className="flex items-center gap-4 text-[11px] text-[#8896a9] flex-wrap">
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500" />Done</span>
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#25488e]" />In Progress</span>
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400" />Planned</span>
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#ff944d]" />Carry Forward</span>
+      {/* ── Calendar / Task History segmented control ── */}
+      <div className="inline-flex p-1 rounded-lg bg-[#f1f4f9] border border-[#e2e7f0]">
+        {([
+          ["calendar", "Calendar"],
+          ["history", "Task History"],
+        ] as const).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setView(value)}
+            className={cn(
+              "px-4 py-2 rounded-md text-sm font-semibold transition-all press-effect",
+              view === value ? "bg-white text-[#25488e] shadow-sm" : "text-[#8896a9] hover:text-[#4a5568]"
+            )}
+          >
+            {label}
+          </button>
+        ))}
       </div>
+
+      {/* ── Legend ── */}
+      {view === "calendar" && (
+        <div className="flex items-center gap-4 text-[11px] text-[#8896a9] flex-wrap">
+          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500" />Done</span>
+          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#25488e]" />In Progress</span>
+          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400" />Planned</span>
+          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#ff944d]" />Carry Forward</span>
+        </div>
+      )}
 
       {/* ── Week navigation ── */}
       <div className="flex items-center gap-2">
@@ -656,8 +827,13 @@ export default function AdminCalendarPage() {
         </button>
       </div>
 
+      {/* ── Task History: the same week, task/subtask level ── */}
+      {view === "history" && (
+        <WeekTaskHistory weekISO={weekISO} executiveId={execFilter || undefined} visitHrefBase="/admin/visits" />
+      )}
+
       {/* ── Calendar grid: full week, no horizontal scroll ── */}
-      {loading ? (
+      {view !== "calendar" ? null : loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
           {Array.from({ length: 7 }).map((_, i) => (
             <div key={i}><SkeletonCard /></div>
@@ -679,7 +855,7 @@ export default function AdminCalendarPage() {
       )}
 
       {/* ── Summary row ── */}
-      {!loading && data && (
+      {view === "calendar" && !loading && data && (
         <div className="grid grid-cols-3 gap-4">
           {[
             { label: "Visits this week", value: totalVisits, color: "text-[#25488e]", Icon: Building2 },
@@ -698,7 +874,7 @@ export default function AdminCalendarPage() {
       )}
 
       {/* ── Executive schedule overview (desktop) ── */}
-      {!loading && data && executives.length > 0 && !execFilter && (
+      {view === "calendar" && !loading && data && executives.length > 0 && !execFilter && (
         <div className="hidden md:block bg-white border border-[#e2e7f0] rounded-xl overflow-hidden shadow-sm">
           <div className="px-5 py-3 border-b border-[#e2e7f0] flex items-center gap-2">
             <Users className="w-4 h-4 text-[#25488e]" />

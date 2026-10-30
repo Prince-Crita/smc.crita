@@ -264,6 +264,17 @@ model Visit {
   closedAt      DateTime?
   summaryJson   Json?
   notes         String?
+  // Per-visit task selection (Admin → Calendar → Create Visit). Holds the
+  // client's task-type keys the admin ticked for THIS visit only; the
+  // client's Task Configuration itself is never changed by it.
+  //
+  // EMPTY — the default, and the value of every visit created before this
+  // column existed — means "no explicit selection": the visit follows the
+  // client's full Task Configuration exactly as it always has. When it is
+  // NOT empty, the automatic top-up and sync paths in create-visit.ts only
+  // ever scaffold these task types, so a task the admin left unticked can
+  // never be added back to the visit behind their back.
+  selectedTaskTypes String[] @default([])
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 

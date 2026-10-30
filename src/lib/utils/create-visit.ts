@@ -139,6 +139,9 @@ const NOTHING_ADDED: ScaffoldResult = { tasksAdded: 0, subtasksAdded: 0 };
  * never gains a duplicate twin. Tasks already present are left untouched —
  * their title, order, subtasks and progress are not rewritten here.
  *
+ * A visit created with an explicit task selection only ever receives the
+ * task types that were selected for it (see applyTaskSelection).
+ *
  * Constant number of queries regardless of how many tasks are added.
  */
 export async function addMissingConfiguredTasks(visitId: string): Promise<ScaffoldResult> {
@@ -148,13 +151,14 @@ export async function addMissingConfiguredTasks(visitId: string): Promise<Scaffo
       id: true,
       clientId: true,
       status: true,
+      selectedTaskTypes: true,
       tasks: { select: { id: true, taskType: true, subtasks: { select: { title: true } } } },
     },
   });
   // Closed visits are completed history and keep the tasks they closed with.
   if (!visit || visit.status === "CLOSED") return NOTHING_ADDED;
 
-  const plan = await resolveClientTaskPlan(visit.clientId);
+  const plan = applyTaskSelection(await resolveClientTaskPlan(visit.clientId), visit.selectedTaskTypes);
   if (plan.length === 0) return NOTHING_ADDED;
 
   const existingTypes = new Set(visit.tasks.map((t) => t.taskType));
@@ -244,6 +248,10 @@ export async function ensureCarryForwardVisitHasClientTasks(visitId: string): Pr
  * completion, carried items and progress are never renamed, reordered,
  * replaced or deleted.
  *
+ * "The client's configured work" is narrowed to the visit's own task
+ * selection when the admin chose tasks for it in Create Visit, so assigning
+ * or re-assigning such a visit never brings back a task that was left out.
+ *
  * Rule 2 is preserved: a carry-forward-ONLY visit still goes through the
  * narrower gate above, so a visit that exists purely to hold carried subtasks
  * alongside the client's real visit stays exactly that.
@@ -273,6 +281,15 @@ export const DEFAULT_TASK_TYPES = [
 ];
 
 export const DEFAULT_TASK_TYPE_SET: Set<string> = new Set(DEFAULT_TASK_TYPES.map((t) => t.type));
+
+/**
+ * Monthly tasks: MR Monthly Report and MD Meeting. Each is done once a month
+ * and carries a required Yes/No answer before a visit holding it can close
+ * (validateVisitClose). They remain ordinary task types in every client's
+ * Task Configuration — this set only decides that Create Visit does NOT tick
+ * them by default, so the admin includes them in a visit explicitly.
+ */
+export const MONTHLY_TASK_TYPES: ReadonlySet<string> = new Set(["MR_MONTHLY_REPORT", "MD_MEETING"]);
 
 /** Convert a human-readable title to a SCREAMING_SNAKE_CASE task type key */
 export function titleToTaskType(title: string): string {
@@ -366,6 +383,27 @@ export async function resolveClientTaskPlan(clientId: string): Promise<TaskPlanE
 }
 
 /**
+ * Narrow a resolved task plan to a visit's explicit task selection
+ * (Visit.selectedTaskTypes, set by Admin → Calendar → Create Visit).
+ *
+ * An EMPTY selection means the visit has no explicit selection — every visit
+ * created before per-visit selection existed, and every visit made by client
+ * creation, client duplication or carry-forward — and the full plan is
+ * returned unchanged, so those visits behave exactly as they always have.
+ *
+ * The plan's order and orderIndex values are kept as they are, so selected
+ * tasks keep the client's configured order.
+ */
+export function applyTaskSelection(
+  plan: TaskPlanEntry[],
+  selectedTaskTypes: readonly string[] | null | undefined
+): TaskPlanEntry[] {
+  if (!selectedTaskTypes || selectedTaskTypes.length === 0) return plan;
+  const selected = new Set(selectedTaskTypes);
+  return plan.filter((entry) => selected.has(entry.type));
+}
+
+/**
  * Batch-scaffold tasks + subtasks for a visit from a resolved task plan.
  * Exactly 3 DB round-trips regardless of task count:
  *   1. task.createMany, 2. fetch created task ids, 3. subtask.createMany.
@@ -429,6 +467,11 @@ export async function createTasksWithSubtasks(
  *     are ALWAYS preserved - only pristine template copies are replaced.
  *   - Tasks containing any protected subtask are never deleted, even if the
  *     task type was removed from the client's config.
+ *   - A visit created with an explicit task selection is only ever given,
+ *     renamed or re-synced for the task types selected for it. A task type
+ *     the admin left out of that visit — or one added to the configuration
+ *     later — is never added to it. Removal of task types that left the
+ *     configuration follows exactly the same rule as every other visit.
  */
 export async function syncClientPendingVisits(clientId: string): Promise<{ visitsSynced: number }> {
   const [plan, pendingVisits] = await Promise.all([
@@ -459,8 +502,12 @@ export async function syncClientPendingVisits(clientId: string): Promise<{ visit
 
     const existingByType = new Map(visit.tasks.map((t) => [t.taskType, t]));
 
+    // The visit's own share of the plan: all of it, unless the admin chose
+    // specific tasks for this visit in Create Visit.
+    const visitPlan = applyTaskSelection(plan, visit.selectedTaskTypes);
+
     // 1. Ensure every planned task exists with the current title/order/subtasks
-    for (const entry of plan) {
+    for (const entry of visitPlan) {
       const existing = existingByType.get(entry.type);
 
       if (!existing) {

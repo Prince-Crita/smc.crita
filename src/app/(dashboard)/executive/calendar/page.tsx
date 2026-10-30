@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight, CalendarDays, Building2, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils/utils";
 import { SkeletonCard } from "@/components/ui/Skeleton";
+import { WeekTaskHistory } from "@/components/calendar/WeekTaskHistory";
 import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -135,6 +136,8 @@ function DayColumn({ day, isToday }: { day: CalendarDay; isToday: boolean }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function CalendarPage() {
   const [weekISO, setWeekISO] = useState<string>(new Date().toISOString());
+  // Calendar grid, or the same week's Task History (task/subtask level).
+  const [view, setView] = useState<"calendar" | "history">("calendar");
 
   const fetchCalendar = useCallback(async () => {
     return fetchJSON<CalendarData>(`/api/calendar?week=${encodeURIComponent(weekISO)}`);
@@ -157,7 +160,9 @@ export default function CalendarPage() {
             <h1 className="text-xl font-bold text-[#0f1829]">
               {loading ? "Calendar" : `Week ${data?.weekNumber} · ${data?.monthLabel}`}
             </h1>
-            <p className="text-xs text-[#8896a9]">Tap a visit to open it</p>
+            <p className="text-xs text-[#8896a9]">
+              {view === "calendar" ? "Tap a visit to open it" : "Your tasks and subtasks for this week"}
+            </p>
           </div>
         </div>
         <button
@@ -168,13 +173,35 @@ export default function CalendarPage() {
         </button>
       </div>
 
-      {/* ── Legend ── */}
-      <div className="flex items-center gap-4 text-[11px] text-[#8896a9]">
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500" />Done</span>
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#25488e]" />In Progress</span>
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400" />Planned</span>
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#ff944d]" />Carry</span>
+      {/* ── Calendar / Task History segmented control ── */}
+      <div className="inline-flex p-1 rounded-lg bg-[#f1f4f9] border border-[#e2e7f0]">
+        {([
+          ["calendar", "Calendar"],
+          ["history", "Task History"],
+        ] as const).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setView(value)}
+            className={cn(
+              "px-4 py-2 rounded-md text-sm font-semibold transition-all press-effect",
+              view === value ? "bg-white text-[#25488e] shadow-sm" : "text-[#8896a9] hover:text-[#4a5568]"
+            )}
+          >
+            {label}
+          </button>
+        ))}
       </div>
+
+      {/* ── Legend ── */}
+      {view === "calendar" && (
+        <div className="flex items-center gap-4 text-[11px] text-[#8896a9]">
+          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500" />Done</span>
+          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#25488e]" />In Progress</span>
+          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400" />Planned</span>
+          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#ff944d]" />Carry</span>
+        </div>
+      )}
 
       {/* ── Week navigation ── */}
       <div className="flex items-center gap-2">
@@ -201,8 +228,14 @@ export default function CalendarPage() {
         </button>
       </div>
 
+      {/* ── Task History: the same week, task/subtask level ── */}
+      {/* The API scopes this to the executive's own and team visits. */}
+      {view === "history" && (
+        <WeekTaskHistory weekISO={weekISO} visitHrefBase="/executive/visits" />
+      )}
+
       {/* ── Calendar Grid: full week, no horizontal scroll ── */}
-      {loading ? (
+      {view !== "calendar" ? null : loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
           {Array.from({ length: 7 }).map((_, i) => (
             <div key={i}>
@@ -223,7 +256,7 @@ export default function CalendarPage() {
       )}
 
       {/* ── Summary ── */}
-      {!loading && data && (
+      {view === "calendar" && !loading && data && (
         <div className="bg-white border border-[#e2e7f0] rounded-xl p-4 flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-[#eef2fb] flex items-center justify-center flex-shrink-0">
             <Building2 className="w-4 h-4 text-[#25488e]" />
@@ -241,9 +274,11 @@ export default function CalendarPage() {
       )}
 
       {/* ── Threshold note ── */}
-      <p className="text-[11px] text-[#8896a9] text-center pb-2">
-        Threshold check runs per week — moving a visit out of the week prompts a carry-forward reason.
-      </p>
+      {view === "calendar" && (
+        <p className="text-[11px] text-[#8896a9] text-center pb-2">
+          Threshold check runs per week — moving a visit out of the week prompts a carry-forward reason.
+        </p>
+      )}
     </div>
   );
 }

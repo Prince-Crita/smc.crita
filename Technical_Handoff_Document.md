@@ -326,47 +326,84 @@ stateDiagram-v2
 
 ## 14. Environment Variables
 
-Create a `.env` file in the project root:
+Env files are git-ignored. Every developer creates their own — **never copy
+someone else's `.env.local` or `.env.build`**, which can hold production
+credentials. Section 16a explains which file wins when a key appears in more
+than one; `.env.example` documents every variable.
 
-```env
-# Database
-DATABASE_URL="postgresql://user:pass@host/db?sslmode=require"
+| Variable | Required | Local development file | Notes |
+|---|---|---|---|
+| `DATABASE_URL` | Yes | `.env.development.local` | The **local** PostgreSQL database. Never the production URL. |
+| `JWT_SECRET` | Yes | `.env.local` | At least 32 random characters; generate your own (Section 15, step 3). |
+| `RESEND_API_KEY` | No | `.env.local` | Leave unset locally — emails are printed to the terminal instead of sent, so closing a seeded visit cannot email the sample clients' addresses. |
+| `RESEND_FROM_EMAIL` | No | `.env.local` | Sender for visit-close summary emails. |
+| `ADMIN_EMAIL` | No | `.env.local` | Extra recipient of visit-close summary emails. |
+| `NEXT_PUBLIC_BASE_PATH` | No | — | Leave unset locally (Section 16a, "Local URL and mount point"). |
 
-# Authentication
-JWT_SECRET="your-super-secure-jwt-secret-key-min-32-chars"
-
-# Email Configuration (Optional - will fallback to console if empty)
-RESEND_API_KEY="re_123456789"
-```
+Production values live only in `.env.build` (company server) and the Vercel
+project's environment variables.
 
 ---
 
-## 15. Installation & Setup Guide
+## 15. Installation & Setup Guide (local development)
 
-**Prerequisites:** Node.js 18+, npm/yarn.
+**Prerequisites:**
+* **Node.js 22.19.0** — pinned in `.nvmrc`; `package.json` requires `>=22.19.0 <23`.
+* **PostgreSQL 16** running locally. On Windows, the postgresql.org installer runs it as a service and includes pgAdmin and `psql`. Note the password you choose for the `postgres` user.
 
 1. **Clone & Install:**
-   ```bash
-   git clone <repo-url>
-   cd smc-task-management
+   ```powershell
+   git clone https://github.com/Prince-Crita/smc_apk.git
+   cd smc_apk
+   git checkout dev
    npm install
    ```
-2. **Environment Setup:** Copy the `.env` variables as shown in Section 14.
-3. **Database Sync & Seed:**
-   ```bash
-   npx prisma db push
-   npm run prisma:seed
+2. **Create the local database:**
+   ```powershell
+   & "C:\Program Files\PostgreSQL\16\bin\createdb.exe" -U postgres smc_task_dev
    ```
-4. **Run Local Server:**
-   ```bash
+   Or in pgAdmin: right-click **Databases → Create → Database…** and name it `smc_task_dev`.
+3. **Create the env files** in the project root:
+
+   `.env.development.local`
+   ```env
+   DATABASE_URL="postgresql://postgres:YOUR_POSTGRES_PASSWORD@localhost:5432/smc_task_dev"
+   ```
+   URL-encode special characters in the password (`@` → `%40`, `#` → `%23`).
+
+   `.env.local`
+   ```env
+   JWT_SECRET="<output of the command below>"
+   ```
+   ```powershell
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   ```
+4. **Create the tables and load sample data:**
+   ```powershell
+   npx prisma db push
+   npx prisma db seed
+   ```
+   Both must print `[prisma] target: host=localhost db=smc_task_dev`. If any other
+   host appears, stop and see Section 16a.
+
+   `prisma db seed` **deletes every user, client, visit and task** before inserting
+   the sample data. Run it only on a new or disposable local database, never on
+   production. It prints the sample login credentials when it finishes (defined in
+   `prisma/seed.ts`).
+5. **Run Local Server:**
+   ```powershell
    npm run dev
    ```
-   *Access `http://localhost:3000`.*
-5. **Production Build:**
-   ```bash
-   npm run build
-   npm start
-   ```
+   The terminal must print
+   `[db] development → host=localhost port=5432 db=smc_task_dev user=postgres`.
+   Open `http://localhost:3000/login`.
+
+**Troubleshooting:**
+* **Every login returns "Internal server error"** — open `http://localhost:3000/api/dev/db-target`. If it reports `database "smc_task_dev" does not exist`, redo step 2. If the dev server terminal says a table does not exist, redo step 4.
+* **Turbopack panics with `Failed to restore task data (corrupted database or bug)`** — the dev cache is damaged (usually the server was killed mid-write). Stop the dev server, delete the `.next` folder, and start it again.
+
+Deployment builds are covered in `deployment/README.md` and
+`COMPANY_SERVER_MIGRATION_GUIDE.md`.
 
 ---
 
