@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, memo } from "react";
 import {
-  ChevronLeft, ChevronRight, Plus, RotateCcw, Building2,
+  ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, RotateCcw, Building2,
   Users, CalendarDays, AlertCircle, CheckCircle2,
 } from "lucide-react";
 import { cn, formatDate } from "@/lib/utils/utils";
@@ -10,6 +10,7 @@ import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { WeekTaskHistory } from "@/components/calendar/WeekTaskHistory";
+import { WeekPicker, todayWeekAnchor } from "@/components/calendar/WeekPicker";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import { useLiveQuery, fetchJSON, revalidateAll } from "@/lib/hooks/useLiveQuery";
@@ -52,6 +53,8 @@ interface PlanTask {
   title: string;
   orderIndex: number;
   subtaskCount: number;
+  /** The task's configured subtasks — `id` is the subtask template id. */
+  subtasks: { id: string; title: string }[];
   isMonthly: boolean;
 }
 
@@ -99,15 +102,22 @@ function CreateVisitModal({ prefillDate, clients, executives, onClose, onCreated
   const [visitType, setVisitType]     = useState<"SOLO" | "TEAM">("SOLO");
   const [memberIds, setMemberIds]     = useState<string[]>([]);
 
-  // ── Tasks for THIS visit ───────────────────────────────────────────────────
+  // ── Tasks and subtasks for THIS visit ──────────────────────────────────────
   // Loaded from the selected client's Task Configuration. Only the ticked
-  // tasks are created on the visit; the configuration itself is not changed.
-  // Regular tasks start ticked, monthly tasks start unticked — the admin
-  // includes a monthly task in a visit explicitly.
+  // tasks and subtasks are created on the visit; the configuration itself is
+  // not changed. Regular tasks start ticked with all their subtasks, monthly
+  // tasks start unticked — the admin includes a monthly task explicitly.
+  //
+  // Selection is held at subtask level. A main task WITH subtasks is selected
+  // exactly when at least one of its subtasks is ticked (ticking a subtask
+  // includes its main task; unticking the last one excludes it). A main task
+  // with no configured subtasks is ticked on its own.
   const [planTasks, setPlanTasks]     = useState<PlanTask[] | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError]     = useState("");
-  const [selectedTaskTypes, setSelectedTaskTypes] = useState<string[]>([]);
+  const [selectedSubtaskIds, setSelectedSubtaskIds] = useState<string[]>([]);
+  const [selectedBareTypes, setSelectedBareTypes]   = useState<string[]>([]);
+  const [expandedTypes, setExpandedTypes]           = useState<string[]>([]);
   // Only the most recent client's response is applied, so quickly switching
   // clients can never show (or submit) another client's task list.
   const planRequestRef = useRef(0);
@@ -115,7 +125,9 @@ function CreateVisitModal({ prefillDate, clients, executives, onClose, onCreated
   const loadTaskPlan = useCallback(async (id: string) => {
     const requestId = ++planRequestRef.current;
     setPlanTasks(null);
-    setSelectedTaskTypes([]);
+    setSelectedSubtaskIds([]);
+    setSelectedBareTypes([]);
+    setExpandedTypes([]);
     setPlanError("");
     if (!id) { setPlanLoading(false); return; }
     setPlanLoading(true);
@@ -124,8 +136,10 @@ function CreateVisitModal({ prefillDate, clients, executives, onClose, onCreated
         `/api/admin/visits?taskPlanFor=${encodeURIComponent(id)}`
       );
       if (requestId !== planRequestRef.current) return;
+      const regular = tasks.filter((t) => !t.isMonthly);
       setPlanTasks(tasks);
-      setSelectedTaskTypes(tasks.filter((t) => !t.isMonthly).map((t) => t.type));
+      setSelectedSubtaskIds(regular.flatMap((t) => t.subtasks.map((s) => s.id)));
+      setSelectedBareTypes(regular.filter((t) => t.subtasks.length === 0).map((t) => t.type));
     } catch (err) {
       if (requestId !== planRequestRef.current) return;
       setPlanError(err instanceof Error ? err.message : "Could not load this client's tasks");
@@ -134,10 +148,40 @@ function CreateVisitModal({ prefillDate, clients, executives, onClose, onCreated
     }
   }, []);
 
-  const toggleTask = (type: string) =>
-    setSelectedTaskTypes((prev) => prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]);
+  const subtaskSet = new Set(selectedSubtaskIds);
+  const selectedSubtaskCountOf = (t: PlanTask) => t.subtasks.filter((s) => subtaskSet.has(s.id)).length;
+  const isTaskSelected = (t: PlanTask) =>
+    t.subtasks.length > 0 ? selectedSubtaskCountOf(t) > 0 : selectedBareTypes.includes(t.type);
+
+  // Main-task checkbox: a ticked (or partly ticked) task is cleared; an
+  // unticked one is included with all of its subtasks.
+  const toggleTask = (t: PlanTask) => {
+    if (t.subtasks.length === 0) {
+      setSelectedBareTypes((prev) => prev.includes(t.type) ? prev.filter((x) => x !== t.type) : [...prev, t.type]);
+      return;
+    }
+    const ids = t.subtasks.map((s) => s.id);
+    setSelectedSubtaskIds((prev) =>
+      isTaskSelected(t) ? prev.filter((id) => !ids.includes(id)) : [...prev.filter((id) => !ids.includes(id)), ...ids]
+    );
+  };
+  const toggleSubtask = (id: string) =>
+    setSelectedSubtaskIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  const toggleExpanded = (type: string) =>
+    setExpandedTypes((prev) => prev.includes(type) ? prev.filter((x) => x !== type) : [...prev, type]);
+  const selectAllTasks = () => {
+    if (!planTasks) return;
+    setSelectedSubtaskIds(planTasks.flatMap((t) => t.subtasks.map((s) => s.id)));
+    setSelectedBareTypes(planTasks.filter((t) => t.subtasks.length === 0).map((t) => t.type));
+  };
+  const clearAllTasks = () => { setSelectedSubtaskIds([]); setSelectedBareTypes([]); };
 
   const hasTaskPlan = !!planTasks && planTasks.length > 0;
+  // Both lists in the client's configured order.
+  const selectedTaskTypes = hasTaskPlan ? planTasks!.filter(isTaskSelected).map((t) => t.type) : [];
+  const orderedSubtaskIds = hasTaskPlan
+    ? planTasks!.flatMap((t) => t.subtasks.filter((s) => subtaskSet.has(s.id)).map((s) => s.id))
+    : [];
 
   const handleSubmit = async () => {
     if (!clientId || !executiveId || !scheduledDate) {
@@ -164,10 +208,6 @@ function CreateVisitModal({ prefillDate, clients, executives, onClose, onCreated
       toast.error("End date cannot be before the start date");
       return;
     }
-    // Sent in the client's configured order.
-    const orderedSelection = hasTaskPlan
-      ? planTasks!.filter((t) => selectedTaskTypes.includes(t.type)).map((t) => t.type)
-      : [];
     setSubmitting(true);
     try {
       const res = await fetch("/api/admin/visits", {
@@ -177,8 +217,9 @@ function CreateVisitModal({ prefillDate, clients, executives, onClose, onCreated
           clientId, executiveId, scheduledDate, ...(endDate ? { endDate } : {}), notes,
           visitType, ...(visitType === "TEAM" ? { memberIds } : {}),
           // Omitted only when the client has no configured tasks at all, which
-          // keeps that case exactly as it was.
-          ...(hasTaskPlan ? { selectedTaskTypes: orderedSelection } : {}),
+          // keeps that case exactly as it was. Both are validated again on the
+          // server against the client's current configuration.
+          ...(hasTaskPlan ? { selectedTaskTypes, selectedSubtaskIds: orderedSubtaskIds } : {}),
         }),
       });
       const json = await res.json() as { error?: string; code?: string };
@@ -234,12 +275,12 @@ function CreateVisitModal({ prefillDate, clients, executives, onClose, onCreated
               </label>
               {hasTaskPlan && (
                 <div className="flex items-center gap-1.5 text-[11px] font-semibold">
-                  <button type="button" onClick={() => setSelectedTaskTypes(planTasks!.map((t) => t.type))}
+                  <button type="button" onClick={selectAllTasks}
                     className="text-[#25488e] hover:underline">
                     Select all
                   </button>
                   <span className="text-[#c8d2e0]">·</span>
-                  <button type="button" onClick={() => setSelectedTaskTypes([])}
+                  <button type="button" onClick={clearAllTasks}
                     className="text-[#8896a9] hover:underline">
                     Clear
                   </button>
@@ -267,33 +308,67 @@ function CreateVisitModal({ prefillDate, clients, executives, onClose, onCreated
               </p>
             ) : hasTaskPlan ? (
               <>
-                <div className="border border-[#e2e7f0] rounded-lg divide-y divide-[#f1f4f9] max-h-52 overflow-y-auto">
+                <div className="border border-[#e2e7f0] rounded-lg divide-y divide-[#f1f4f9] max-h-64 overflow-y-auto">
                   {planTasks!.map((t) => {
-                    const checked = selectedTaskTypes.includes(t.type);
+                    const total = t.subtasks.length;
+                    const ticked = selectedSubtaskCountOf(t);
+                    const checked = isTaskSelected(t);
+                    const partial = total > 0 && ticked > 0 && ticked < total;
+                    const isOpen = expandedTypes.includes(t.type);
                     return (
-                      <label key={t.type} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[#f8fafc]">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleTask(t.type)}
-                          className="w-4 h-4 accent-[#25488e] flex-shrink-0"
-                        />
-                        <span className="flex-1 min-w-0 text-sm text-[#0f1829] truncate">{t.title}</span>
-                        {t.isMonthly && (
-                          <span className="flex-shrink-0 text-[10px] font-bold text-[#800040] bg-[#800040]/10 px-1.5 py-0.5 rounded-full">
-                            Monthly
-                          </span>
+                      <div key={t.type}>
+                        <div className="flex items-center gap-2 px-3 py-2 hover:bg-[#f8fafc]">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            ref={(el) => { if (el) el.indeterminate = partial; }}
+                            onChange={() => toggleTask(t)}
+                            aria-label={`Include ${t.title}`}
+                            className="w-4 h-4 accent-[#25488e] flex-shrink-0 cursor-pointer"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => total > 0 ? toggleExpanded(t.type) : toggleTask(t)}
+                            aria-expanded={total > 0 ? isOpen : undefined}
+                            className="flex-1 min-w-0 flex items-center gap-2 text-left"
+                          >
+                            <span className="flex-1 min-w-0 text-sm text-[#0f1829] truncate">{t.title}</span>
+                            {t.isMonthly && (
+                              <span className="flex-shrink-0 text-[10px] font-bold text-[#800040] bg-[#800040]/10 px-1.5 py-0.5 rounded-full">
+                                Monthly
+                              </span>
+                            )}
+                            <span className="flex-shrink-0 text-[11px] text-[#8896a9] tabular-nums">
+                              {total > 0 ? `${ticked}/${total}` : "No subtasks"}
+                            </span>
+                            {total > 0 && (isOpen
+                              ? <ChevronUp className="w-4 h-4 text-[#25488e] flex-shrink-0" />
+                              : <ChevronDown className="w-4 h-4 text-[#8896a9] flex-shrink-0" />)}
+                          </button>
+                        </div>
+                        {isOpen && total > 0 && (
+                          <div className="pb-2 pl-9 pr-3 bg-[#fbfcfe]">
+                            {t.subtasks.map((s) => (
+                              <label key={s.id} className="flex items-center gap-2 py-1.5 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={subtaskSet.has(s.id)}
+                                  onChange={() => toggleSubtask(s.id)}
+                                  className="w-3.5 h-3.5 accent-[#25488e] flex-shrink-0"
+                                />
+                                <span className="text-xs text-[#4a5568]">{s.title}</span>
+                              </label>
+                            ))}
+                          </div>
                         )}
-                        <span className="flex-shrink-0 text-[11px] text-[#8896a9] tabular-nums">
-                          {t.subtaskCount} subtask{t.subtaskCount === 1 ? "" : "s"}
-                        </span>
-                      </label>
+                      </div>
                     );
                   })}
                 </div>
                 <p className="text-[11px] text-[#8896a9] mt-1">
-                  {selectedTaskTypes.length} of {planTasks!.length} selected. Only ticked tasks are added to this visit —
-                  monthly tasks are included only when ticked. The client&apos;s Task Configuration is not changed.
+                  {selectedTaskTypes.length} of {planTasks!.length} tasks · {orderedSubtaskIds.length} subtask{orderedSubtaskIds.length === 1 ? "" : "s"} selected.
+                  Open a task to choose its subtasks. Only ticked items are added to this visit — monthly tasks only when ticked.
+                  The client&apos;s Task Configuration is not changed.
                 </p>
               </>
             ) : null}
@@ -596,7 +671,9 @@ const DayColumn = memo(function DayColumn({
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function AdminCalendarPage() {
-  const [weekISO, setWeekISO]     = useState(new Date().toISOString());
+  // A 12:00-UTC anchor on today's date, so the API always resolves the right
+  // week (see WeekPicker for why a raw toISOString() can land on the day before).
+  const [weekISO, setWeekISO]     = useState(todayWeekAnchor);
   const [execFilter, setExecFilter] = useState("");
   const [executives, setExecutives] = useState<Executive[]>([]);
   const [clients, setClients]       = useState<Client[]>([]);
@@ -629,7 +706,7 @@ export default function AdminCalendarPage() {
 
   const goToPrev = () => setWeekISO((w) => prevMonday(w));
   const goToNext = () => setWeekISO((w) => nextMonday(w));
-  const goToToday = () => setWeekISO(new Date().toISOString());
+  const goToToday = () => setWeekISO(todayWeekAnchor());
 
   const handleAddVisit = useCallback((dateISO: string) => {
     setCreatePrefillDate(dateISO);
@@ -812,14 +889,10 @@ export default function AdminCalendarPage() {
           className="p-2 rounded-lg bg-[#f1f4f9] hover:bg-[#e2e7f0] text-[#8896a9] transition-colors">
           <ChevronLeft className="w-4 h-4" />
         </button>
-        <div className="flex-1 text-center">
-          {!loading && data && (
-            <p className="text-sm font-medium text-[#0f1829]">
-              {new Date(data.days[0].date).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}
-              {" – "}
-              {new Date(data.days[6].date).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}
-            </p>
-          )}
+        {/* Click the range to jump to any year / month / week. Shared by the
+            Calendar grid and Task History. */}
+        <div className="flex-1 flex justify-center">
+          <WeekPicker weekISO={weekISO} onSelect={setWeekISO} />
         </div>
         <button onClick={goToNext}
           className="p-2 rounded-lg bg-[#f1f4f9] hover:bg-[#e2e7f0] text-[#8896a9] transition-colors">

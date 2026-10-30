@@ -11,6 +11,8 @@ import {
 import { formatDate, formatDateTime, formatTimeAgo, getProgressColor, getRatingColor, cn } from "@/lib/utils/utils";
 import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
 import { Modal } from "@/components/ui/Modal";
+import { StartVisitModal } from "@/components/executive/StartVisitModal";
+import { VisitPhotoGallery } from "@/components/visits/VisitPhotoGallery";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -55,6 +57,8 @@ interface Visit {
   progress: number;
   totalSubtasks: number;
   completedSubtasks: number;
+  /** Number of geotagged photos uploaded when the visit was started. */
+  photoCount?: number;
   client: { name: string; code: string; contactPerson: string; address: string; phone: string | null };
   executive: { name: string; email: string };
   tasks: Task[];
@@ -697,7 +701,8 @@ export default function VisitDetailPage() {
   const router = useRouter();
   const visitId = params.visitId as string;
 
-  const [isOpening, setIsOpening] = useState(false);
+  // Open Visit now first asks for the mandatory geotagged photo(s).
+  const [showStartVisit, setShowStartVisit] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
   const [closeNotes, setCloseNotes] = useState("");
@@ -725,21 +730,14 @@ export default function VisitDetailPage() {
     if (error) toast.error("Failed to load visit");
   }, [error]);
 
-  const handleOpenVisit = async () => {
-    setIsOpening(true);
-    try {
-      const res = await fetch(`/api/visits/${visitId}`, { method: "PATCH" });
-      if (!res.ok) {
-        const d = await res.json();
-        throw new Error(d.error || "Failed");
-      }
-      toast.success("Visit opened!");
-      await fetchVisit();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to open visit");
-    } finally {
-      setIsOpening(false);
-    }
+  // Open Visit → the Start Company Visit popup. It uploads the photo(s) and
+  // then makes the same open request as before (PATCH /api/visits/[id]), now
+  // carrying the uploaded photos; the server refuses to open without them.
+  const handleOpenVisit = () => setShowStartVisit(true);
+
+  const handleVisitStarted = async () => {
+    setShowStartVisit(false);
+    await fetchVisit();
   };
 
   // Called by TaskCard — no reason enforcement here, that's only at close.
@@ -903,15 +901,10 @@ export default function VisitDetailPage() {
               <button
                 type="button"
                 onClick={handleOpenVisit}
-                disabled={isOpening}
                 id="open-visit-btn"
                 className="px-4 py-2.5 bg-[#25488e] hover:bg-[#1e3a72] active:bg-[#162d5c] disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-all flex items-center gap-2 shadow-sm press-effect"
               >
-                {isOpening ? (
-                  <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : (
-                  <CheckSquare className="w-4 h-4" />
-                )}
+                <CheckSquare className="w-4 h-4" />
                 Open Visit
               </button>
             )}
@@ -990,6 +983,11 @@ export default function VisitDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Geotagged images (collapsed; uploaded when the visit started) ── */}
+      {(visit.status !== "PENDING" || (visit.photoCount ?? 0) > 0) && (
+        <VisitPhotoGallery visitId={visit.id} photoCount={visit.photoCount ?? 0} />
+      )}
 
       {/* ── Progress tracker ───────────────────────────────────────── */}
       <div className="bg-white border border-[#e2e7f0] rounded-xl p-5 shadow-sm">
@@ -1129,6 +1127,15 @@ export default function VisitDetailPage() {
       </div>
 
       {/* ── Modals ───────────────────────────────────────────────── */}
+      {showStartVisit && visit.status === "PENDING" && (
+        <StartVisitModal
+          visitId={visit.id}
+          clientName={visit.client.name}
+          onClose={() => setShowStartVisit(false)}
+          onStarted={handleVisitStarted}
+        />
+      )}
+
       {showCloseConfirm && (
         <CloseVisitModal
           isClosing={isClosing}

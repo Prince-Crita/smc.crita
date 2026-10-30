@@ -130,6 +130,7 @@ model User {
   carryForwardApprovals Subtask[]        @relation("CarryForwardApprovals")
   adminOperations    AdminOperation[]    @relation("AdminOperationActor")
   undoneOperations   AdminOperation[]    @relation("AdminOperationUndoer")
+  visitPhotos        VisitPhoto[]        @relation("VisitPhotoUploads")
 
   @@map("users")
 }
@@ -275,6 +276,18 @@ model Visit {
   // ever scaffold these task types, so a task the admin left unticked can
   // never be added back to the visit behind their back.
   selectedTaskTypes String[] @default([])
+  // Per-visit SUBTASK selection, the second level of the same Create Visit
+  // choice: the SubtaskTemplate ids the admin ticked under the selected main
+  // tasks. Only those template subtasks are created on the visit, and the
+  // automatic top-up and sync paths never add an unticked one back.
+  //
+  // EMPTY — the default, every visit created before this column existed,
+  // and every visit made outside Create Visit — means "no subtask-level
+  // selection": each included main task carries all of its configured
+  // subtasks, exactly as before. Template ids are stable across renames, so
+  // a renamed template still matches; the client's Task Configuration itself
+  // is never changed by this.
+  selectedSubtaskTemplateIds String[] @default([])
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
@@ -285,6 +298,7 @@ model Visit {
   reassignments VisitReassignment[]
   delegations   VisitDelegation[]
   assignments   VisitAssignment[]
+  photos        VisitPhoto[]
 
   // ─── Indexes ───────────────────────────────────────────────────────────────
   // PostgreSQL does NOT create an index for a foreign key, so every lookup
@@ -302,6 +316,36 @@ model Visit {
   @@index([status])
   @@index([updatedAt])
   @@map("visits")
+}
+
+// ─── Geotagged visit photos ───────────────────────────────────────────────────
+// The photo(s) an executive uploads when starting a visit (Open Visit), as
+// proof of attendance. The image itself lives in S3 — only its key and a few
+// facts about it are stored here, never the image bytes.
+//
+// gpsLatitude / gpsLongitude are filled ONLY when the uploaded file itself
+// carries EXIF GPS coordinates; they are never inferred or invented. Many
+// geotag camera apps print the location onto the picture instead, and phones
+// may strip EXIF location when sharing, so null is a normal value.
+//
+// Additive: visits opened before this feature simply have no rows here.
+model VisitPhoto {
+  id           String   @id @default(cuid())
+  visitId      String
+  uploadedById String
+  s3Key        String   @unique
+  originalName String?
+  contentType  String
+  sizeBytes    Int
+  gpsLatitude  Float?
+  gpsLongitude Float?
+  createdAt    DateTime @default(now())
+
+  visit      Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  uploadedBy User  @relation("VisitPhotoUploads", fields: [uploadedById], references: [id])
+
+  @@index([visitId])
+  @@map("visit_photos")
 }
 
 // ─── Team membership for a visit ──────────────────────────────────────────────

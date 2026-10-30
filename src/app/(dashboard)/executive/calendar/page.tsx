@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight, CalendarDays, Building2, RotateCcw } from "l
 import { cn } from "@/lib/utils/utils";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { WeekTaskHistory } from "@/components/calendar/WeekTaskHistory";
+import { WeekPicker, todayWeekAnchor } from "@/components/calendar/WeekPicker";
 import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -135,7 +136,9 @@ function DayColumn({ day, isToday }: { day: CalendarDay; isToday: boolean }) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function CalendarPage() {
-  const [weekISO, setWeekISO] = useState<string>(new Date().toISOString());
+  // A 12:00-UTC anchor on today's date, so the API always resolves the right
+  // week (see WeekPicker for why a raw toISOString() can land on the day before).
+  const [weekISO, setWeekISO] = useState<string>(todayWeekAnchor);
   // Calendar grid, or the same week's Task History (task/subtask level).
   const [view, setView] = useState<"calendar" | "history">("calendar");
 
@@ -148,7 +151,7 @@ export default function CalendarPage() {
 
   const goToPrev = () => setWeekISO((w) => prevMonday(w));
   const goToNext = () => setWeekISO((w) => nextMonday(w));
-  const goToToday = () => setWeekISO(new Date().toISOString());
+  const goToToday = () => setWeekISO(todayWeekAnchor());
 
   return (
     <div className="animate-in space-y-4">
@@ -211,14 +214,10 @@ export default function CalendarPage() {
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
-        <div className="flex-1 text-center">
-          {!loading && data && (
-            <p className="text-sm font-medium text-[#0f1829]">
-              {new Date(data.days[0].date).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}
-              {" – "}
-              {new Date(data.days[6].date).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}
-            </p>
-          )}
+        {/* Tap the range to jump to any year / month / week. Shared by the
+            Calendar grid and Task History. */}
+        <div className="flex-1 flex justify-center">
+          <WeekPicker weekISO={weekISO} onSelect={setWeekISO} />
         </div>
         <button
           onClick={goToNext}

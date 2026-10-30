@@ -140,7 +140,8 @@ const NOTHING_ADDED: ScaffoldResult = { tasksAdded: 0, subtasksAdded: 0 };
  * their title, order, subtasks and progress are not rewritten here.
  *
  * A visit created with an explicit task selection only ever receives the
- * task types that were selected for it (see applyTaskSelection).
+ * task types — and, when subtasks were chosen too, the subtasks — that were
+ * selected for it (see applyTaskSelection).
  *
  * Constant number of queries regardless of how many tasks are added.
  */
@@ -152,17 +153,24 @@ export async function addMissingConfiguredTasks(visitId: string): Promise<Scaffo
       clientId: true,
       status: true,
       selectedTaskTypes: true,
+      selectedSubtaskTemplateIds: true,
       tasks: { select: { id: true, taskType: true, subtasks: { select: { title: true } } } },
     },
   });
   // Closed visits are completed history and keep the tasks they closed with.
   if (!visit || visit.status === "CLOSED") return NOTHING_ADDED;
 
-  const plan = applyTaskSelection(await resolveClientTaskPlan(visit.clientId), visit.selectedTaskTypes);
+  const plan = applyTaskSelection(
+    await resolveClientTaskPlan(visit.clientId),
+    visit.selectedTaskTypes,
+    visit.selectedSubtaskTemplateIds
+  );
   if (plan.length === 0) return NOTHING_ADDED;
 
   const existingTypes = new Set(visit.tasks.map((t) => t.taskType));
-  const missingTasks = plan.filter((entry) => !existingTypes.has(entry.type));
+  // A task whose chosen subtasks no longer exist in the configuration is never
+  // recreated as an empty shell (see keepExistingSubtasks).
+  const missingTasks = plan.filter((entry) => !existingTypes.has(entry.type) && !entry.keepExistingSubtasks);
 
   if (missingTasks.length > 0) {
     await prisma.task.createMany({
@@ -248,9 +256,9 @@ export async function ensureCarryForwardVisitHasClientTasks(visitId: string): Pr
  * completion, carried items and progress are never renamed, reordered,
  * replaced or deleted.
  *
- * "The client's configured work" is narrowed to the visit's own task
- * selection when the admin chose tasks for it in Create Visit, so assigning
- * or re-assigning such a visit never brings back a task that was left out.
+ * "The client's configured work" is narrowed to the visit's own task (and
+ * subtask) selection when the admin chose them in Create Visit, so assigning
+ * or re-assigning such a visit never brings back anything that was left out.
  *
  * Rule 2 is preserved: a carry-forward-ONLY visit still goes through the
  * narrower gate above, so a visit that exists purely to hold carried subtasks
@@ -307,12 +315,28 @@ export function taskTypeToTitle(taskType: string): string {
 
 // ─── Task plan resolution ──────────────────────────────────────────────────────
 
+/** One configured subtask of a plan entry: its SubtaskTemplate id and title. */
+export interface TaskPlanSubtask {
+  id: string;
+  title: string;
+}
+
 export interface TaskPlanEntry {
   type: string;
   title: string;
   orderIndex: number;
   /** Subtask titles resolved from templates (client-specific > global). */
   subtaskTitles: string[];
+  /** The same subtasks with their template ids (same order as subtaskTitles). */
+  subtasks: TaskPlanSubtask[];
+  /**
+   * Set only by applyTaskSelection, when a visit's chosen subtasks for this
+   * task no longer exist in the configuration (their templates were deleted
+   * or replaced since the visit was created). The automatic paths then leave
+   * whatever the visit already holds for this task exactly as it is — they
+   * neither empty it nor fill it with subtasks the admin never chose.
+   */
+  keepExistingSubtasks?: boolean;
 }
 
 /**
@@ -350,11 +374,11 @@ export async function resolveClientTaskPlan(clientId: string): Promise<TaskPlanE
     ]),
   ].filter((tt) => !configByType.get(tt)?.isDeleted);
 
-  const resolveSubtaskTitles = (taskType: string): string[] => {
+  const resolveSubtasks = (taskType: string): TaskPlanSubtask[] => {
     const source = clientTaskTypeSet.has(taskType)
       ? clientTemplates.filter((t) => t.taskType === taskType)
       : globalTemplates.filter((t) => t.taskType === taskType);
-    return source.map((t) => t.title);
+    return source.map((t) => ({ id: t.id, title: t.title }));
   };
 
   return [
@@ -379,28 +403,53 @@ export async function resolveClientTaskPlan(clientId: string): Promise<TaskPlanE
   ]
     .sort((a, b) => a.orderIndex - b.orderIndex)
     // Re-normalize orderIndex so Task rows are always 0..n-1 without gaps
-    .map((t, i) => ({ ...t, orderIndex: i, subtaskTitles: resolveSubtaskTitles(t.type) }));
+    .map((t, i) => {
+      const subtasks = resolveSubtasks(t.type);
+      return { ...t, orderIndex: i, subtaskTitles: subtasks.map((s) => s.title), subtasks };
+    });
 }
 
 /**
- * Narrow a resolved task plan to a visit's explicit task selection
- * (Visit.selectedTaskTypes, set by Admin → Calendar → Create Visit).
+ * Narrow a resolved task plan to a visit's explicit selection, set by
+ * Admin → Calendar → Create Visit:
+ *   - Visit.selectedTaskTypes          which main tasks the visit holds
+ *   - Visit.selectedSubtaskTemplateIds which of their subtasks it holds
  *
- * An EMPTY selection means the visit has no explicit selection — every visit
- * created before per-visit selection existed, and every visit made by client
- * creation, client duplication or carry-forward — and the full plan is
- * returned unchanged, so those visits behave exactly as they always have.
+ * An EMPTY selectedTaskTypes means the visit has no explicit selection —
+ * every visit created before per-visit selection existed, and every visit
+ * made by client creation, client duplication or carry-forward — and the
+ * full plan is returned unchanged, so those visits behave exactly as they
+ * always have. An EMPTY selectedSubtaskTemplateIds means no subtask-level
+ * selection: each included task keeps all of its configured subtasks.
+ *
+ * With a subtask-level selection, each included task keeps only its chosen
+ * subtasks. Template ids survive renames, so a renamed subtask still matches.
+ * When NONE of a task's chosen subtasks exist any more (their templates were
+ * deleted or replaced by a client-specific set), the entry is flagged
+ * keepExistingSubtasks so the automatic paths leave that task as it is.
  *
  * The plan's order and orderIndex values are kept as they are, so selected
  * tasks keep the client's configured order.
  */
 export function applyTaskSelection(
   plan: TaskPlanEntry[],
-  selectedTaskTypes: readonly string[] | null | undefined
+  selectedTaskTypes: readonly string[] | null | undefined,
+  selectedSubtaskTemplateIds?: readonly string[] | null
 ): TaskPlanEntry[] {
   if (!selectedTaskTypes || selectedTaskTypes.length === 0) return plan;
   const selected = new Set(selectedTaskTypes);
-  return plan.filter((entry) => selected.has(entry.type));
+  const tasks = plan.filter((entry) => selected.has(entry.type));
+  if (!selectedSubtaskTemplateIds || selectedSubtaskTemplateIds.length === 0) return tasks;
+
+  const chosen = new Set(selectedSubtaskTemplateIds);
+  return tasks.map((entry) => {
+    if (entry.subtasks.length === 0) return entry;
+    const kept = entry.subtasks.filter((s) => chosen.has(s.id));
+    if (kept.length === 0) {
+      return { ...entry, subtasks: [], subtaskTitles: [], keepExistingSubtasks: true };
+    }
+    return { ...entry, subtasks: kept, subtaskTitles: kept.map((s) => s.title) };
+  });
 }
 
 /**
@@ -472,6 +521,10 @@ export async function createTasksWithSubtasks(
  *     the admin left out of that visit — or one added to the configuration
  *     later — is never added to it. Removal of task types that left the
  *     configuration follows exactly the same rule as every other visit.
+ *   - The same holds one level down: with a subtask-level selection, a
+ *     task's template subtasks are re-synced to the CHOSEN subtasks only
+ *     (renames still flow through), and a task whose chosen subtasks no
+ *     longer exist is left exactly as it is.
  */
 export async function syncClientPendingVisits(clientId: string): Promise<{ visitsSynced: number }> {
   const [plan, pendingVisits] = await Promise.all([
@@ -503,14 +556,17 @@ export async function syncClientPendingVisits(clientId: string): Promise<{ visit
     const existingByType = new Map(visit.tasks.map((t) => [t.taskType, t]));
 
     // The visit's own share of the plan: all of it, unless the admin chose
-    // specific tasks for this visit in Create Visit.
-    const visitPlan = applyTaskSelection(plan, visit.selectedTaskTypes);
+    // specific tasks (and subtasks) for this visit in Create Visit.
+    const visitPlan = applyTaskSelection(plan, visit.selectedTaskTypes, visit.selectedSubtaskTemplateIds);
 
     // 1. Ensure every planned task exists with the current title/order/subtasks
     for (const entry of visitPlan) {
       const existing = existingByType.get(entry.type);
 
       if (!existing) {
+        // Never recreate a task as an empty shell when its chosen subtasks
+        // are gone from the configuration.
+        if (entry.keepExistingSubtasks) continue;
         const task = await prisma.task.create({
           data: {
             visitId: visit.id,
@@ -541,6 +597,11 @@ export async function syncClientPendingVisits(clientId: string): Promise<{ visit
         });
       }
 
+      // The visit's chosen subtasks for this task no longer exist in the
+      // configuration: keep what the visit holds rather than emptying it or
+      // filling it with subtasks the admin never chose.
+      if (entry.keepExistingSubtasks) continue;
+
       // Re-sync template-derived subtasks. Preserve carried-forward,
       // completed, and executive-touched (incompletion reason) subtasks;
       // only the plain, untouched template copies are replaced - and only
@@ -550,7 +611,15 @@ export async function syncClientPendingVisits(clientId: string): Promise<{ visit
       const preserved = existing.subtasks.filter(isProtected);
       const replaceable = existing.subtasks.filter((s) => !isProtected(s));
       const currentTitles = replaceable.map((s) => s.title);
-      const wantedTitles = entry.subtaskTitles;
+      // A template line the executive has already completed (or given a
+      // reason for) is already on the visit as a preserved row. It must not
+      // be created a second time: before this, any template change re-added
+      // every such line as a fresh, incomplete duplicate, which reopened
+      // finished work. Carried-forward rows are not counted here, so a
+      // carried item and the visit's own template line keep coexisting
+      // exactly as before.
+      const preservedTemplateTitles = new Set(preserved.filter((s) => !s.isCarriedForward).map((s) => s.title));
+      const wantedTitles = entry.subtaskTitles.filter((t) => !preservedTemplateTitles.has(t));
       const unchanged =
         currentTitles.length === wantedTitles.length &&
         currentTitles.every((t, i) => t === wantedTitles[i]);

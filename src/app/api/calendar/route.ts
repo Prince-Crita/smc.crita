@@ -12,6 +12,7 @@ import { getSubtaskTotals } from "@/lib/utils/visit-status";
 //   week=YYYY-MM-DD  (any day in the desired week; defaults to current week)
 //   executiveId=...  (admin only - filter by executive)
 //   view=tasks       (optional - the week's Task History instead of the grid)
+//   status=...       (view=tasks only - PENDING | COMPLETED | CLOSED; omitted = all)
 //
 // Returns visits grouped by day-of-week (Mon-Sun) for that week.
 //
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest) {
 
     // Week-wise Task History — same visits, task-level detail.
     if (searchParams.get("view") === "tasks") {
-      return NextResponse.json(await buildWeekTaskHistory(where, monday, sunday));
+      return NextResponse.json(await buildWeekTaskHistory(where, monday, sunday, searchParams.get("status")));
     }
 
     const visits = await prisma.visit.findMany({
@@ -170,7 +171,26 @@ function historyTaskStatus(
   return "PENDING";
 }
 
-async function buildWeekTaskHistory(where: Prisma.VisitWhereInput, monday: Date, sunday: Date) {
+/**
+ * Task History status filter, applied on the server to the week's real rows:
+ *   PENDING   - a task not yet completed, on a visit that is still open
+ *   COMPLETED - a task whose subtasks are all completed (open or closed visit)
+ *   CLOSED    - every task of a visit that has been closed
+ * Anything else (or nothing) = all tasks.
+ */
+type HistoryStatusFilter = "ALL" | "PENDING" | "COMPLETED" | "CLOSED";
+
+function parseHistoryStatus(value: string | null): HistoryStatusFilter {
+  return value === "PENDING" || value === "COMPLETED" || value === "CLOSED" ? value : "ALL";
+}
+
+async function buildWeekTaskHistory(
+  where: Prisma.VisitWhereInput,
+  monday: Date,
+  sunday: Date,
+  statusParam: string | null
+) {
+  const status = parseHistoryStatus(statusParam);
   const visits = await prisma.visit.findMany({
     where,
     select: {
@@ -182,7 +202,7 @@ async function buildWeekTaskHistory(where: Prisma.VisitWhereInput, monday: Date,
       endDate: true,
       closedAt: true,
       notes: true,
-      client: { select: { name: true, code: true } },
+      client: { select: { id: true, name: true, code: true } },
       executive: { select: { id: true, name: true } },
       assignments: {
         select: { executiveId: true, role: true, executive: { select: { name: true } } },
@@ -198,7 +218,10 @@ async function buildWeekTaskHistory(where: Prisma.VisitWhereInput, monday: Date,
           mdMeetingAnswer: true,
           completedAt: true,
           subtasks: {
-            orderBy: { createdAt: "asc" },
+            // Same order as the executive's visit page (carried items last),
+            // with the id as a final tie-breaker: subtasks created together
+            // share one createdAt, and ids follow their configured order.
+            orderBy: [{ isCarriedForward: "asc" }, { createdAt: "asc" }, { id: "asc" }],
             select: {
               id: true,
               title: true,
@@ -217,19 +240,30 @@ async function buildWeekTaskHistory(where: Prisma.VisitWhereInput, monday: Date,
     orderBy: { scheduledDate: "asc" },
   });
 
-  const totals = { visits: visits.length, tasks: 0, completedTasks: 0, subtasks: 0, completedSubtasks: 0 };
+  // Week totals always describe the whole week, whatever filter is applied.
+  const totals = {
+    visits: visits.length,
+    closedVisits: 0,
+    tasks: 0,
+    completedTasks: 0,
+    pendingTasks: 0,
+    subtasks: 0,
+    completedSubtasks: 0,
+  };
 
   const rows = visits.map((v) => {
     const { carryForwardCount, displayStatus } = getSubtaskTotals(v.tasks, v.status);
     const visitClosed = v.status === "CLOSED";
+    if (visitClosed) totals.closedVisits += 1;
 
     const tasks = v.tasks.map((t) => {
       const totalSubtasks = t.subtasks.length;
       const completedSubtasks = t.subtasks.filter((s) => s.isCompleted).length;
-      const status = historyTaskStatus(completedSubtasks, totalSubtasks, t.status, visitClosed);
+      const taskStatus = historyTaskStatus(completedSubtasks, totalSubtasks, t.status, visitClosed);
 
       totals.tasks += 1;
-      if (status === "COMPLETED") totals.completedTasks += 1;
+      if (taskStatus === "COMPLETED") totals.completedTasks += 1;
+      else if (!visitClosed) totals.pendingTasks += 1;
       totals.subtasks += totalSubtasks;
       totals.completedSubtasks += completedSubtasks;
 
@@ -237,7 +271,7 @@ async function buildWeekTaskHistory(where: Prisma.VisitWhereInput, monday: Date,
         id: t.id,
         taskType: t.taskType,
         title: t.title,
-        status,
+        status: taskStatus,
         mdMeetingAnswer: t.mdMeetingAnswer,
         completedAt: t.completedAt,
         completedSubtasks,
@@ -282,11 +316,29 @@ async function buildWeekTaskHistory(where: Prisma.VisitWhereInput, monday: Date,
     };
   });
 
+  // Apply the status filter to the real rows. A visit is listed only while it
+  // still has tasks matching the filter, except under CLOSED, which lists
+  // every closed visit with all of its tasks.
+  const filtered =
+    status === "CLOSED"
+      ? rows.filter((v) => v.status === "CLOSED")
+      : status === "PENDING"
+      ? rows
+          .filter((v) => v.status !== "CLOSED")
+          .map((v) => ({ ...v, tasks: v.tasks.filter((t) => t.status !== "COMPLETED") }))
+          .filter((v) => v.tasks.length > 0)
+      : status === "COMPLETED"
+      ? rows
+          .map((v) => ({ ...v, tasks: v.tasks.filter((t) => t.status === "COMPLETED") }))
+          .filter((v) => v.tasks.length > 0)
+      : rows;
+
   return {
     weekNumber: getWeekNumber(monday),
     monday: monday.toISOString(),
     sunday: sunday.toISOString(),
-    visits: rows,
+    status,
+    visits: filtered,
     totals,
   };
 }

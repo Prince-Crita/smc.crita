@@ -65,7 +65,10 @@ export async function GET(request: NextRequest) {
           type: entry.type,
           title: entry.title,
           orderIndex: entry.orderIndex,
-          subtaskCount: entry.subtaskTitles.length,
+          subtaskCount: entry.subtasks.length,
+          // Each configured subtask with its template id — what the admin
+          // ticks per subtask in Create Visit.
+          subtasks: entry.subtasks,
           isMonthly: MONTHLY_TASK_TYPES.has(entry.type),
         })),
       });
@@ -193,6 +196,10 @@ export async function POST(request: NextRequest) {
       // the client's full Task Configuration, exactly as before. Present →
       // only these task types are created on this visit.
       selectedTaskTypes?: unknown;
+      // Per-visit subtask selection (optional, requires selectedTaskTypes).
+      // SubtaskTemplate ids under the selected main tasks. Omitted → every
+      // selected main task carries all of its configured subtasks.
+      selectedSubtaskIds?: unknown;
     };
 
     const { clientId, executiveId, scheduledDate, endDate, notes } = body;
@@ -298,7 +305,57 @@ export async function POST(request: NextRequest) {
       // Stored in the client's configured order.
       selectedTaskTypes = chosen.map((entry) => entry.type);
     }
-    const plan = applyTaskSelection(fullPlan, selectedTaskTypes);
+
+    // Per-visit subtask selection, validated against the client's CURRENT
+    // configuration: every id must be a configured subtask of one of the
+    // selected main tasks, and every selected main task that has subtasks
+    // must keep at least one — a main task with all of its subtasks unticked
+    // is simply not selected, so it can never be created as an empty shell.
+    let selectedSubtaskTemplateIds: string[] = [];
+    if (body.selectedSubtaskIds !== undefined) {
+      if (selectedTaskTypes.length === 0) {
+        return NextResponse.json({ error: "Subtasks can only be selected together with their main tasks" }, { status: 400 });
+      }
+      if (
+        !Array.isArray(body.selectedSubtaskIds) ||
+        body.selectedSubtaskIds.some((s) => typeof s !== "string" || !s.trim())
+      ) {
+        return NextResponse.json({ error: "selectedSubtaskIds must be a list of subtask ids" }, { status: 400 });
+      }
+      const requestedSubtasks = new Set(body.selectedSubtaskIds as string[]);
+      const ownerTypeBySubtaskId = new Map<string, string>();
+      for (const entry of fullPlan) {
+        for (const s of entry.subtasks) ownerTypeBySubtaskId.set(s.id, entry.type);
+      }
+      const selectedTypeSet = new Set(selectedTaskTypes);
+      for (const id of requestedSubtasks) {
+        const ownerType = ownerTypeBySubtaskId.get(id);
+        if (!ownerType) {
+          return NextResponse.json(
+            { error: "One or more selected subtasks are no longer in this client's Task Configuration. Re-select the client to refresh its task list." },
+            { status: 400 }
+          );
+        }
+        if (!selectedTypeSet.has(ownerType)) {
+          return NextResponse.json({ error: "A selected subtask belongs to a main task that is not selected" }, { status: 400 });
+        }
+      }
+      const selectedEntries = fullPlan.filter((entry) => selectedTypeSet.has(entry.type));
+      const withoutSubtasks = selectedEntries.find(
+        (entry) => entry.subtasks.length > 0 && !entry.subtasks.some((s) => requestedSubtasks.has(s.id))
+      );
+      if (withoutSubtasks) {
+        return NextResponse.json(
+          { error: `Select at least one subtask for "${withoutSubtasks.title}", or untick it` },
+          { status: 400 }
+        );
+      }
+      // Stored in the client's configured order, each id once.
+      selectedSubtaskTemplateIds = selectedEntries.flatMap((entry) =>
+        entry.subtasks.filter((s) => requestedSubtasks.has(s.id)).map((s) => s.id)
+      );
+    }
+    const plan = applyTaskSelection(fullPlan, selectedTaskTypes, selectedSubtaskTemplateIds);
 
     // Visit, team rows and the configured task structure are committed
     // TOGETHER. Previously the tasks were written after the visit had already
@@ -317,6 +374,7 @@ export async function POST(request: NextRequest) {
           notes: notes?.trim() || null,
           status: "PENDING",
           selectedTaskTypes,
+          selectedSubtaskTemplateIds,
           // Team rows are created alongside the visit so a TEAM visit is never
           // briefly visible without its members.
           ...(team.visitType === "TEAM" && {
@@ -348,7 +406,9 @@ export async function POST(request: NextRequest) {
           visitNumber,
           by: user.name,
           taskCount: plan.length,
+          subtaskCount: plan.reduce((n, entry) => n + entry.subtaskTitles.length, 0),
           ...(selectedTaskTypes.length > 0 && { selectedTaskTypes }),
+          ...(selectedSubtaskTemplateIds.length > 0 && { selectedSubtaskTemplateIds }),
         },
       },
     });

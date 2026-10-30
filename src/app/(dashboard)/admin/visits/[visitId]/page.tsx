@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils/utils";
 import Link from "next/link";
 import { ArrowLeft, Building2, CheckCircle2, XCircle, RotateCcw, FileText, User, Users, Calendar, Clock } from "lucide-react";
 import { AutoRevalidate } from "@/components/ui/AutoRevalidate";
+import { VisitPhotoGallery } from "@/components/visits/VisitPhotoGallery";
 
 export default async function AdminVisitDetailPage({ params }: { params: Promise<{ visitId: string }> }) {
   const cookieStore = await cookies();
@@ -39,6 +40,12 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
         include: { user: { select: { name: true, role: true } } },
         orderBy: { createdAt: "desc" },
       },
+      // Who uploaded the visit photos, and when — for the collapsed section's
+      // summary line. The images themselves load only when it is expanded.
+      photos: {
+        select: { createdAt: true, uploadedBy: { select: { name: true } } },
+        orderBy: { createdAt: "asc" },
+      },
     },
   });
 
@@ -67,6 +74,12 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
   const teamMembers = visit.assignments
     .filter((a) => a.role !== "LEAD")
     .map((a) => a.executive.name);
+  // "Uploaded by Ravi · 30 Oct 2026, 10:12 AM" (photos are uploaded together
+  // when the visit is started, so the first one dates the set).
+  const photoUploaders = [...new Set(visit.photos.map((p) => p.uploadedBy.name))];
+  const photoSummary = visit.photos.length > 0
+    ? `Uploaded by ${photoUploaders.join(", ")} · ${formatDateTime(visit.photos[0].createdAt)}`
+    : undefined;
 
   return (
     <div className="space-y-5 max-w-4xl">
@@ -120,6 +133,9 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
         </div>
         <p className="text-xs text-slate-500 mt-2">{completedSubtasks} of {totalSubtasks} subtasks completed across {visit.tasks.length} tasks</p>
       </div>
+
+      {/* Geotagged images — collapsed by default */}
+      <VisitPhotoGallery visitId={visit.id} photoCount={visit.photos.length} summary={photoSummary} tone="dark" />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Tasks */}

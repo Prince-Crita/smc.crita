@@ -3,19 +3,23 @@
 import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  CheckCircle2, Circle, Clock, ChevronDown, ChevronRight,
-  RotateCcw, Calendar, User, Users, ClipboardList, AlertCircle,
+  CheckCircle2, Circle, Clock, ChevronDown, ChevronUp,
+  RotateCcw, Calendar, User, Users, ClipboardList, AlertCircle, Building2,
 } from "lucide-react";
 import { cn, formatDate, getStatusColor } from "@/lib/utils/utils";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
 
 // ─── Week-wise Task History ───────────────────────────────────────────────────
-// The task-level view of the week the Calendar is showing: every visit in that
-// week with its tasks and subtasks, their completion state and dates. It reads
-// GET /api/calendar?view=tasks, which uses the calendar's own week window and
-// executive scope — an executive sees only their own and their team visits,
-// an admin sees every visit (or one executive's, with the filter).
+// The task-level view of the week the Calendar is showing. Visits are grouped
+// by client and every client starts collapsed, so the week reads as a short
+// list of client names; opening a client shows its visits with their tasks,
+// subtasks, completion state and dates.
+//
+// Data comes from GET /api/calendar?view=tasks, which uses the calendar's own
+// week window and executive scope — an executive sees only their own and their
+// team visits, an admin sees every visit (or one executive's, with the
+// filter). The status filter is applied by the API on the real rows.
 //
 // Refreshes like the rest of the app: on week/filter change, on window focus
 // or tab visibility, and after any mutation that calls revalidateAll().
@@ -52,21 +56,44 @@ interface HistoryVisit {
   endDate: string | null;
   closedAt: string | null;
   hasCarryForward: boolean;
-  client: { name: string; code: string };
+  client: { id: string; name: string; code: string };
   lead: { id: string; name: string };
   members: { id: string; name: string }[];
   tasks: HistoryTask[];
 }
 
+type StatusFilter = "ALL" | "PENDING" | "COMPLETED" | "CLOSED";
+
 interface WeekTaskHistoryData {
   weekNumber: number;
   monday: string;
   sunday: string;
+  status: StatusFilter;
   visits: HistoryVisit[];
-  totals: { visits: number; tasks: number; completedTasks: number; subtasks: number; completedSubtasks: number };
+  totals: {
+    visits: number;
+    closedVisits: number;
+    tasks: number;
+    completedTasks: number;
+    pendingTasks: number;
+    subtasks: number;
+    completedSubtasks: number;
+  };
 }
 
-type TaskFilter = "ALL" | "PENDING" | "COMPLETED";
+const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: "ALL", label: "All statuses" },
+  { value: "PENDING", label: "Pending" },
+  { value: "COMPLETED", label: "Completed" },
+  { value: "CLOSED", label: "Closed" },
+];
+
+const EMPTY_MESSAGES: Record<StatusFilter, string> = {
+  ALL: "No visits scheduled this week",
+  PENDING: "No pending tasks this week",
+  COMPLETED: "No completed tasks this week",
+  CLOSED: "No closed visits this week",
+};
 
 const TASK_STATUS_LABELS: Record<string, string> = {
   PENDING: "Pending",
@@ -93,29 +120,19 @@ function visitDateRange(v: HistoryVisit): string {
   return start === end ? start : `${start} – ${end}`;
 }
 
-// ─── Task row ─────────────────────────────────────────────────────────────────
-function TaskRow({
-  task,
-  isOpen,
-  onToggle,
-}: {
-  task: HistoryTask;
-  isOpen: boolean;
-  onToggle: (taskId: string) => void;
-}) {
-  const isDone = task.status === "COMPLETED";
-  const hasSubtasks = task.subtasks.length > 0;
+interface ClientGroup {
+  client: HistoryVisit["client"];
+  visits: HistoryVisit[];
+  taskCount: number;
+  completedCount: number;
+}
 
+// ─── Task (with its subtasks) ─────────────────────────────────────────────────
+function TaskBlock({ task }: { task: HistoryTask }) {
+  const isDone = task.status === "COMPLETED";
   return (
-    <div>
-      <button
-        type="button"
-        onClick={() => hasSubtasks && onToggle(task.id)}
-        className={cn(
-          "w-full px-4 py-2.5 flex items-center gap-3 text-left transition-colors",
-          hasSubtasks ? "hover:bg-[#f8fafc] cursor-pointer" : "cursor-default"
-        )}
-      >
+    <div className="px-4 py-2.5">
+      <div className="flex items-center gap-3">
         {isDone
           ? <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
           : <Clock className="w-4 h-4 text-amber-500 flex-shrink-0" />}
@@ -131,13 +148,10 @@ function TaskRow({
         <span className={cn("px-2 py-0.5 rounded-full text-[11px] font-semibold border flex-shrink-0", getStatusColor(task.status))}>
           {TASK_STATUS_LABELS[task.status] ?? task.status}
         </span>
-        {hasSubtasks && (isOpen
-          ? <ChevronDown className="w-4 h-4 text-[#8896a9] flex-shrink-0" />
-          : <ChevronRight className="w-4 h-4 text-[#c8d2e0] flex-shrink-0" />)}
-      </button>
+      </div>
 
-      {isOpen && hasSubtasks && (
-        <ul className="pb-3 pl-11 pr-4 space-y-2">
+      {task.subtasks.length > 0 && (
+        <ul className="mt-2 pl-7 space-y-1.5">
           {task.subtasks.map((s) => (
             <li key={s.id} className="flex items-start gap-2">
               {s.isCompleted
@@ -166,30 +180,19 @@ function TaskRow({
   );
 }
 
-// ─── Visit card ───────────────────────────────────────────────────────────────
-function VisitHistoryCard({
-  visit,
-  visitHrefBase,
-  expanded,
-  onToggleTask,
-}: {
-  visit: HistoryVisit;
-  visitHrefBase: string;
-  expanded: Set<string>;
-  onToggleTask: (taskId: string) => void;
-}) {
+// ─── One visit inside an expanded client ──────────────────────────────────────
+function VisitSection({ visit, visitHrefBase }: { visit: HistoryVisit; visitHrefBase: string }) {
   const isTeam = visit.visitType === "TEAM";
   const people = isTeam
     ? [`${visit.lead.name} (Lead)`, ...visit.members.map((m) => m.name)].join(", ")
     : visit.lead.name;
 
   return (
-    <div className="bg-white border border-[#e2e7f0] rounded-xl overflow-hidden">
-      <div className="px-4 py-3 border-b border-[#f1f4f9] flex items-start justify-between gap-3">
+    <div className="border-t border-[#f1f4f9]">
+      <div className="px-4 py-2.5 bg-[#f8f9fc] flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-sm font-semibold text-[#0f1829] truncate">{visit.client.name}</p>
-            <span className="font-mono text-[11px] text-[#4a5568] bg-[#f8f9fc] border border-[#e2e7f0] px-1.5 py-0.5 rounded-md">
+            <span className="font-mono text-[11px] text-[#4a5568] bg-white border border-[#e2e7f0] px-1.5 py-0.5 rounded-md">
               {visit.visitNumber}
             </span>
             {visit.hasCarryForward && (
@@ -222,9 +225,7 @@ function VisitHistoryCard({
         <p className="px-4 py-3 text-xs text-[#8896a9]">No tasks on this visit.</p>
       ) : (
         <div className="divide-y divide-[#f1f4f9]">
-          {visit.tasks.map((task) => (
-            <TaskRow key={task.id} task={task} isOpen={expanded.has(task.id)} onToggle={onToggleTask} />
-          ))}
+          {visit.tasks.map((task) => <TaskBlock key={task.id} task={task} />)}
         </div>
       )}
     </div>
@@ -244,48 +245,52 @@ export function WeekTaskHistory({
   /** Where "View visit" links to: "/admin/visits" or "/executive/visits". */
   visitHrefBase: string;
 }) {
-  const [filter, setFilter] = useState<TaskFilter>("ALL");
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [status, setStatus] = useState<StatusFilter>("ALL");
+  // Clients are collapsed until opened.
+  const [expandedClients, setExpandedClients] = useState<Set<string>>(new Set());
 
   // The request key travels with the response, so a week/filter change never
-  // shows the previous week's tasks under the new week's heading while the
-  // new data is loading.
-  const requestKey = `${weekISO}|${executiveId ?? ""}`;
+  // shows the previous selection's data under the new heading while the new
+  // data is loading.
+  const requestKey = `${weekISO}|${executiveId ?? ""}|${status}`;
   const fetchHistory = useCallback(async () => {
     const params = new URLSearchParams({ week: weekISO, view: "tasks" });
     if (executiveId) params.set("executiveId", executiveId);
+    if (status !== "ALL") params.set("status", status);
     const data = await fetchJSON<WeekTaskHistoryData>(`/api/calendar?${params.toString()}`);
-    return { key: `${weekISO}|${executiveId ?? ""}`, data };
-  }, [weekISO, executiveId]);
+    return { key: `${weekISO}|${executiveId ?? ""}|${status}`, data };
+  }, [weekISO, executiveId, status]);
 
   const { data: result, loading, error, refresh } = useLiveQuery(fetchHistory);
   const data = result && result.key === requestKey ? result.data : null;
 
-  const visits = useMemo(() => {
+  // Visits grouped by client, clients in name order, visits by date.
+  const groups = useMemo<ClientGroup[]>(() => {
     if (!data) return [];
-    if (filter === "ALL") return data.visits;
-    return data.visits
-      .map((v) => ({
-        ...v,
-        tasks: v.tasks.filter((t) => (filter === "COMPLETED" ? t.status === "COMPLETED" : t.status !== "COMPLETED")),
-      }))
-      .filter((v) => v.tasks.length > 0);
-  }, [data, filter]);
+    const byClient = new Map<string, ClientGroup>();
+    for (const v of data.visits) {
+      let group = byClient.get(v.client.id);
+      if (!group) {
+        group = { client: v.client, visits: [], taskCount: 0, completedCount: 0 };
+        byClient.set(v.client.id, group);
+      }
+      group.visits.push(v);
+      group.taskCount += v.tasks.length;
+      group.completedCount += v.tasks.filter((t) => t.status === "COMPLETED").length;
+    }
+    return [...byClient.values()].sort((a, b) => a.client.name.localeCompare(b.client.name));
+  }, [data]);
 
-  const toggleTask = useCallback((taskId: string) => {
-    setExpanded((prev) => {
+  const toggleClient = useCallback((clientId: string) => {
+    setExpandedClients((prev) => {
       const next = new Set(prev);
-      if (next.has(taskId)) next.delete(taskId);
-      else next.add(taskId);
+      if (next.has(clientId)) next.delete(clientId);
+      else next.add(clientId);
       return next;
     });
   }, []);
 
-  const allTaskIds = useMemo(
-    () => visits.flatMap((v) => v.tasks.filter((t) => t.subtasks.length > 0).map((t) => t.id)),
-    [visits]
-  );
-  const allExpanded = allTaskIds.length > 0 && allTaskIds.every((id) => expanded.has(id));
+  const allExpanded = groups.length > 0 && groups.every((g) => expandedClients.has(g.client.id));
 
   if (!data) {
     if (error && !loading) {
@@ -309,16 +314,15 @@ export function WeekTaskHistory({
   }
 
   const { totals } = data;
-  const pendingTasks = totals.tasks - totals.completedTasks;
 
   return (
     <div className="space-y-4">
-      {/* ── Week summary ── */}
+      {/* ── Week summary (whole week, whatever the filter) ── */}
       <div className="grid grid-cols-3 gap-3">
         {[
           { label: "Visits this week", value: `${totals.visits}`, color: "text-[#25488e]", Icon: ClipboardList },
           { label: "Tasks completed", value: `${totals.completedTasks}/${totals.tasks}`, color: "text-green-600", Icon: CheckCircle2 },
-          { label: "Tasks pending", value: `${pendingTasks}`, color: "text-amber-600", Icon: Clock },
+          { label: "Tasks pending", value: `${totals.pendingTasks}`, color: "text-amber-600", Icon: Clock },
         ].map(({ label, value, color, Icon }) => (
           <div key={label} className="bg-white border border-[#e2e7f0] rounded-xl p-3 sm:p-4 flex items-center gap-3">
             <Icon className={cn("w-4 h-4 flex-shrink-0 hidden sm:block", color)} />
@@ -330,62 +334,65 @@ export function WeekTaskHistory({
         ))}
       </div>
 
-      {/* ── Filter + expand ── */}
+      {/* ── Status filter + expand/collapse ── */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="inline-flex p-1 rounded-lg bg-[#f1f4f9] border border-[#e2e7f0]">
-          {([
-            ["ALL", "All tasks"],
-            ["PENDING", "Pending"],
-            ["COMPLETED", "Completed"],
-          ] as const).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setFilter(value)}
-              className={cn(
-                "px-3 py-1.5 rounded-md text-xs font-semibold transition-all press-effect",
-                filter === value ? "bg-white text-[#25488e] shadow-sm" : "text-[#8896a9] hover:text-[#4a5568]"
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        {allTaskIds.length > 0 && (
+        <select
+          value={status}
+          onChange={(e) => setStatus(e.target.value as StatusFilter)}
+          aria-label="Filter by status"
+          className="border border-[#e2e7f0] rounded-lg px-3 py-1.5 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30"
+        >
+          {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        {groups.length > 0 && (
           <button
             type="button"
-            onClick={() => setExpanded(allExpanded ? new Set() : new Set(allTaskIds))}
+            onClick={() => setExpandedClients(allExpanded ? new Set() : new Set(groups.map((g) => g.client.id)))}
             className="text-xs font-semibold text-[#25488e] hover:underline"
           >
-            {allExpanded ? "Hide subtasks" : "Show all subtasks"}
+            {allExpanded ? "Collapse all" : "Expand all"}
           </button>
         )}
       </div>
 
-      {/* ── Visits ── */}
-      {visits.length === 0 ? (
+      {/* ── Clients (collapsed until opened) ── */}
+      {groups.length === 0 ? (
         <div className="text-center py-12 bg-white border border-[#e2e7f0] rounded-xl">
           <ClipboardList className="w-10 h-10 mx-auto mb-3 text-[#c8d2e0]" />
-          <p className="text-sm font-semibold text-[#0f1829]">
-            {filter === "ALL"
-              ? "No visits scheduled this week"
-              : filter === "PENDING"
-              ? "No pending tasks this week"
-              : "No completed tasks this week"}
-          </p>
-          <p className="text-xs text-[#8896a9] mt-1">Use the arrows above to look at another week.</p>
+          <p className="text-sm font-semibold text-[#0f1829]">{EMPTY_MESSAGES[status]}</p>
+          <p className="text-xs text-[#8896a9] mt-1">Use the arrows or the date above to look at another week.</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {visits.map((v) => (
-            <VisitHistoryCard
-              key={v.id}
-              visit={v}
-              visitHrefBase={visitHrefBase}
-              expanded={expanded}
-              onToggleTask={toggleTask}
-            />
-          ))}
+        <div className="space-y-2">
+          {groups.map((g) => {
+            const isOpen = expandedClients.has(g.client.id);
+            return (
+              <div key={g.client.id} className="bg-white border border-[#e2e7f0] rounded-xl overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => toggleClient(g.client.id)}
+                  aria-expanded={isOpen}
+                  className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-[#f8fafc] transition-colors"
+                >
+                  <Building2 className="w-4 h-4 text-[#25488e] flex-shrink-0" />
+                  <div className="flex-1 min-w-0 flex items-center gap-2">
+                    <p className="text-sm font-semibold text-[#0f1829] truncate">{g.client.name}</p>
+                    <span className="font-mono text-[10px] text-[#8896a9] flex-shrink-0">{g.client.code}</span>
+                  </div>
+                  <span className="text-[11px] text-[#8896a9] flex-shrink-0 tabular-nums">
+                    {g.visits.length} visit{g.visits.length === 1 ? "" : "s"} · {g.completedCount}/{g.taskCount} done
+                  </span>
+                  {isOpen
+                    ? <ChevronUp className="w-4 h-4 text-[#25488e] flex-shrink-0" />
+                    : <ChevronDown className="w-4 h-4 text-[#8896a9] flex-shrink-0" />}
+                </button>
+
+                {isOpen && g.visits.map((v) => (
+                  <VisitSection key={v.id} visit={v} visitHrefBase={visitHrefBase} />
+                ))}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
