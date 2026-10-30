@@ -15,6 +15,9 @@ export const completeSubtasksSchema = z.object({
     })
   ),
   mdMeetingAnswer: z.enum(["YES", "NO"]).optional().nullable(),
+  // Only for a task with no subtasks (nothing to tick): marks the task itself
+  // done or not done. Ignored for tasks that have subtasks.
+  completed: z.boolean().optional(),
 });
 
 export const closeVisitSchema = z.object({

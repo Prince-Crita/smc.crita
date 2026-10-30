@@ -27,7 +27,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       );
     }
 
-    const { subtasks, mdMeetingAnswer } = result.data;
+    const { subtasks, mdMeetingAnswer, completed } = result.data;
 
     // Verify the task belongs to a visit this executive works — the solo
     // executive, the team lead, or a team member. Members complete their own
@@ -111,7 +111,20 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       : completedCount;           // Partial submission — use merged count
 
     let taskStatus: "PENDING" | "IN_PROGRESS" | "COMPLETED" | "PARTIALLY_COMPLETED" = "PENDING";
-    if (effectiveCompleted === totalCount && totalCount > 0) {
+    if (totalCount === 0) {
+      // A task with no subtasks has nothing to tick, so its own state decides:
+      //   MD Meeting / MR Monthly Report - done when the YES/NO answer is YES
+      //     (a NO is still recorded and satisfies the close check)
+      //   any other task - done when the executive marks it completed
+      const isAnswerTask = task.taskType === "MD_MEETING" || task.taskType === "MR_MONTHLY_REPORT";
+      if (isAnswerTask) {
+        taskStatus = (mdMeetingAnswer ?? task.mdMeetingAnswer) === "YES" ? "COMPLETED" : "PENDING";
+      } else if (typeof completed === "boolean") {
+        taskStatus = completed ? "COMPLETED" : "PENDING";
+      } else {
+        taskStatus = task.status === "COMPLETED" ? "COMPLETED" : "PENDING";
+      }
+    } else if (effectiveCompleted === totalCount) {
       taskStatus = "COMPLETED";
     } else if (effectiveCompleted > 0) {
       taskStatus = "IN_PROGRESS";

@@ -163,11 +163,13 @@ const TaskCard = memo(function TaskCard({
 }: {
   task: Task;
   isEditable: boolean;
-  onSave: (taskId: string, subtasks: Subtask[], mdMeetingAnswer?: string) => Promise<void>;
+  onSave: (taskId: string, subtasks: Subtask[], mdMeetingAnswer?: string, completed?: boolean) => Promise<void>;
 }) {
   const [isExpanded, setIsExpanded] = useState(task.status !== "PENDING");
   const [localSubtasks, setLocalSubtasks] = useState<Subtask[]>(task.subtasks);
   const [mdAnswer, setMdAnswer] = useState<"YES" | "NO" | "">(task.mdMeetingAnswer || "");
+  // For a task with no subtasks: whether the task itself is marked completed.
+  const [doneLocal, setDoneLocal] = useState(task.status === "COMPLETED");
   const [isSaving, setIsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -179,19 +181,27 @@ const TaskCard = memo(function TaskCard({
     if (!isDirty) {
       setLocalSubtasks(task.subtasks);
       setMdAnswer(task.mdMeetingAnswer || "");
+      setDoneLocal(task.status === "COMPLETED");
     }
     prevTaskRef.current = task;
   }, [task, isDirty]);
 
   const completedCount = localSubtasks.filter((s) => s.isCompleted).length;
   const totalCount = localSubtasks.length;
-  const taskProgress = totalCount === 0 ? 0 : Math.round((completedCount / totalCount) * 100);
   const isMdMeeting = task.taskType === "MD_MEETING";
   // MR Monthly Report has a REQUIRED "Completed" (Yes/No) answer, stored in
   // the same per-task answer column as the MD Meeting confirmation. The visit
   // cannot be closed until it is answered (enforced server-side too).
   const isMrReport = task.taskType === "MR_MONTHLY_REPORT";
   const needsAnswer = isMdMeeting || isMrReport;
+  // A task with no subtasks has nothing to tick: an answer task is done when
+  // answered YES, any other task when the executive marks it completed (the
+  // same rule the server applies when saving).
+  const hasNoSubtasks = totalCount === 0;
+  const noSubtaskDone = needsAnswer ? mdAnswer === "YES" : doneLocal;
+  const taskProgress = hasNoSubtasks
+    ? (noSubtaskDone ? 100 : 0)
+    : Math.round((completedCount / totalCount) * 100);
 
   // Derive a text-color class from completion progress — used in the count label
   const statusColor =
@@ -241,7 +251,8 @@ const TaskCard = memo(function TaskCard({
       await onSave(
         task.id,
         localSubtasks,
-        mdAnswer || undefined
+        mdAnswer || undefined,
+        hasNoSubtasks && !needsAnswer ? doneLocal : undefined
       );
       setIsDirty(false);
       toast.success("Progress saved ✓");
@@ -306,7 +317,7 @@ const TaskCard = memo(function TaskCard({
               />
             </div>
             <span className={cn("text-xs font-medium", statusColor)}>
-              {completedCount}/{totalCount}
+              {hasNoSubtasks ? (noSubtaskDone ? "Done" : "Not done") : `${completedCount}/${totalCount}`}
             </span>
           </div>
         </div>
@@ -374,6 +385,25 @@ const TaskCard = memo(function TaskCard({
             </div>
           )}
 
+          {/* A task with no subtasks (and no YES/NO answer): mark it done */}
+          {hasNoSubtasks && !needsAnswer && (
+            isEditable ? (
+              <label className="flex items-center gap-3 p-3 rounded-xl border border-[#e2e7f0] bg-white cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={doneLocal}
+                  onChange={(e) => { setDoneLocal(e.target.checked); setIsDirty(true); setSaveError(null); }}
+                  className="w-4 h-4 accent-green-600 flex-shrink-0"
+                />
+                <span className="text-sm text-[#0f1829]">Mark this task as completed</span>
+              </label>
+            ) : (
+              <p className={cn("text-xs font-medium", doneLocal ? "text-green-600" : "text-[#8896a9]")}>
+                {doneLocal ? "✓ Completed" : "Not completed"}
+              </p>
+            )
+          )}
+
           {/* Subtasks */}
           <div className="space-y-2">
             {localSubtasks.map((subtask) => (
@@ -418,7 +448,7 @@ const TaskCard = memo(function TaskCard({
           )}
 
           {/* Saved state indicator */}
-          {isEditable && !isDirty && completedCount > 0 && (
+          {isEditable && !isDirty && (completedCount > 0 || (hasNoSubtasks && noSubtaskDone)) && (
             <p className="text-xs text-center text-green-600 flex items-center justify-center gap-1">
               <CheckCircle2 className="w-3 h-3" />
               Progress saved
@@ -745,7 +775,7 @@ export default function VisitDetailPage() {
   // logs + all tasks + client data), we patch only the changed task in local
   // state using the updatedTask returned in the API response. This makes
   // task saves feel instant without a network round-trip for the refetch.
-  const handleSaveTask = async (taskId: string, subtasks: Subtask[], mdMeetingAnswer?: string) => {
+  const handleSaveTask = async (taskId: string, subtasks: Subtask[], mdMeetingAnswer?: string, completed?: boolean) => {
     const res = await fetch(`/api/tasks/${taskId}/complete`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -756,6 +786,7 @@ export default function VisitDetailPage() {
           incompletionReason: s.incompletionReason ?? null,
         })),
         mdMeetingAnswer: mdMeetingAnswer || null,
+        ...(completed !== undefined ? { completed } : {}),
       }),
     });
 
@@ -1019,7 +1050,9 @@ export default function VisitDetailPage() {
           {visit.tasks.map((task) => {
             const comp = task.subtasks.filter((s) => s.isCompleted).length;
             const tot = task.subtasks.length;
-            const pct = tot === 0 ? 0 : Math.round((comp / tot) * 100);
+            const pct = tot === 0
+              ? (task.status === "COMPLETED" ? 100 : 0)
+              : Math.round((comp / tot) * 100);
             return (
               <div key={task.id} className="flex flex-col items-center gap-1">
                 <div className={cn(
@@ -1071,9 +1104,12 @@ export default function VisitDetailPage() {
             reasons and saving behave identically in either section. */}
         <div className="lg:col-span-2 space-y-3">
           {(() => {
+            // A task with no subtasks at all (e.g. MD Meeting's YES/NO answer)
+            // is a scheduled task too: it stays in the list. Dropping it made
+            // a selected task invisible while closing still required it.
             const normalTasks = visit.tasks
               .map((t) => ({ ...t, subtasks: t.subtasks.filter((s) => !s.isCarriedForward) }))
-              .filter((t) => t.subtasks.length > 0);
+              .filter((t, i) => t.subtasks.length > 0 || visit.tasks[i].subtasks.length === 0);
             const carriedTasks = visit.tasks
               .map((t) => ({ ...t, subtasks: t.subtasks.filter((s) => s.isCarriedForward) }))
               .filter((t) => t.subtasks.length > 0);

@@ -148,8 +148,12 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
 
             const total = task.subtasks.length;
 
+            // A task with no subtasks (e.g. MD Meeting's YES/NO answer) is done
+            // when its own status says so — there is nothing to count.
             const pct =
-              total === 0 ? 0 : Math.round((completed / total) * 100);
+              total === 0
+                ? (task.status === "COMPLETED" ? 100 : 0)
+                : Math.round((completed / total) * 100);
 
             return (
               <div key={task.id} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
@@ -163,7 +167,9 @@ export default async function AdminVisitDetailPage({ params }: { params: Promise
                       </span>
                     )}
                   </div>
-                  <span className="text-xs text-slate-400">{completed}/{total}</span>
+                  <span className="text-xs text-slate-400">
+                    {total === 0 ? (task.status === "COMPLETED" ? "Done" : "Not done") : `${completed}/${total}`}
+                  </span>
                 </div>
                 <div className="divide-y divide-slate-800/50">
                   {task.subtasks.map((subtask: any) => (

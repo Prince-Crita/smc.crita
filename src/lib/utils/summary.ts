@@ -110,7 +110,10 @@ export function generateVisitSummary(visit: VisitData, carryForwardCount: number
     totalSubtasks += taskTotal;
     completedSubtasks += taskCompleted;
 
-    if (taskCompleted === taskTotal) {
+    // A task with no subtasks is done only when its own status says so
+    // (0 of 0 subtasks would otherwise count it as completed automatically).
+    const taskDone = taskTotal === 0 ? task.status === "COMPLETED" : taskCompleted === taskTotal;
+    if (taskDone) {
       completedTasks++;
     } else if (taskCompleted > 0) {
       partialTasks++;
@@ -125,7 +128,7 @@ export function generateVisitSummary(visit: VisitData, carryForwardCount: number
     return {
       taskType: task.taskType,
       title: task.title,
-      status: taskCompleted === taskTotal ? "COMPLETED" : taskCompleted > 0 ? "PARTIALLY_COMPLETED" : "PENDING",
+      status: taskDone ? "COMPLETED" : taskCompleted > 0 ? "PARTIALLY_COMPLETED" : "PENDING",
       completedSubtasks: taskCompleted,
       totalSubtasks: taskTotal,
       incompleteItems,

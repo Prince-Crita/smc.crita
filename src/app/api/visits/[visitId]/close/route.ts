@@ -119,6 +119,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       visit.tasks.map((task) => {
         const completedCount = task.subtasks.filter((s) => s.isCompleted).length;
         const totalCount = task.subtasks.length;
+        // A task with no subtasks keeps the status it was given when it was
+        // completed (MD/MR answered YES, or marked completed) — there is
+        // nothing to recount, and recounting reset it to PENDING.
+        if (totalCount === 0) return Promise.resolve();
         let taskStatus: "PENDING" | "IN_PROGRESS" | "COMPLETED" | "PARTIALLY_COMPLETED" = "PENDING";
         if (completedCount === totalCount && totalCount > 0) taskStatus = "COMPLETED";
         else if (completedCount > 0) taskStatus = "PARTIALLY_COMPLETED";
@@ -173,7 +177,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         closedAt: new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
         progress: summary.completionPercentage,
         totalTasks: visit.tasks.length,
-        completedTasks: visit.tasks.filter((t) => t.subtasks.every((st) => st.isCompleted)).length,
+        completedTasks: visit.tasks.filter((t) =>
+          t.subtasks.length === 0 ? t.status === "COMPLETED" : t.subtasks.every((st) => st.isCompleted)
+        ).length,
         totalSubtasks,
         completedSubtasks,
         carryForwardCount: carriedCount,
@@ -181,7 +187,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         notes: body.notes,
         tasks: visit.tasks.map((t) => ({
           title: t.title,
-          status: t.subtasks.every((st) => st.isCompleted) ? "COMPLETED" : t.subtasks.some((st) => st.isCompleted) ? "PARTIALLY_COMPLETED" : "PENDING",
+          status: t.subtasks.length === 0
+            ? (t.status === "COMPLETED" ? "COMPLETED" : "PENDING")
+            : t.subtasks.every((st) => st.isCompleted) ? "COMPLETED" : t.subtasks.some((st) => st.isCompleted) ? "PARTIALLY_COMPLETED" : "PENDING",
           completedSubtasks: t.subtasks.filter((st) => st.isCompleted).length,
           totalSubtasks: t.subtasks.length,
         })),
