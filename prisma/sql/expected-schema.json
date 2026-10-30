@@ -1,0 +1,964 @@
+{
+ "tables": {
+  "activity_logs": {
+   "action": {
+    "type": "ActivityAction",
+    "nullable": false,
+    "default": null
+   },
+   "createdAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP"
+   },
+   "id": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "metadata": {
+    "type": "jsonb",
+    "nullable": true,
+    "default": null
+   },
+   "userId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "visitId": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   }
+  },
+  "admin_operations": {
+   "action": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "afterJson": {
+    "type": "jsonb",
+    "nullable": true,
+    "default": null
+   },
+   "beforeJson": {
+    "type": "jsonb",
+    "nullable": true,
+    "default": null
+   },
+   "createdAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP"
+   },
+   "entityId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "entityType": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "id": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "isReversible": {
+    "type": "bool",
+    "nullable": false,
+    "default": "false"
+   },
+   "reason": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "summary": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "undoneAt": {
+    "type": "timestamp",
+    "nullable": true,
+    "default": null
+   },
+   "undoneById": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "userId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   }
+  },
+  "attendance": {
+   "createdAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP"
+   },
+   "date": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": null
+   },
+   "executiveId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "id": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "isLate": {
+    "type": "bool",
+    "nullable": false,
+    "default": "false"
+   },
+   "notes": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "punchIn": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": null
+   },
+   "punchOut": {
+    "type": "timestamp",
+    "nullable": true,
+    "default": null
+   },
+   "updatedAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": null
+   },
+   "workingMinutes": {
+    "type": "int4",
+    "nullable": true,
+    "default": null
+   }
+  },
+  "client_task_types": {
+   "clientId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "createdAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP"
+   },
+   "id": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "isDeleted": {
+    "type": "bool",
+    "nullable": false,
+    "default": "false"
+   },
+   "orderIndex": {
+    "type": "int4",
+    "nullable": true,
+    "default": null
+   },
+   "taskType": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "title": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "updatedAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": null
+   }
+  },
+  "clients": {
+   "address": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "assignedExecId": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "code": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "contactPerson": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "createdAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP"
+   },
+   "email": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "endDate": {
+    "type": "timestamp",
+    "nullable": true,
+    "default": null
+   },
+   "id": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "isArchived": {
+    "type": "bool",
+    "nullable": false,
+    "default": "false"
+   },
+   "name": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "phone": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "reportEmails": {
+    "type": "_text",
+    "nullable": true,
+    "default": "ARRAY[]::text[]"
+   },
+   "seniorExecId": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "startDate": {
+    "type": "timestamp",
+    "nullable": true,
+    "default": null
+   },
+   "updatedAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": null
+   }
+  },
+  "leave_requests": {
+   "adminComment": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "createdAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP"
+   },
+   "date": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": null
+   },
+   "executiveId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "halfDayPeriod": {
+    "type": "HalfDayPeriod",
+    "nullable": true,
+    "default": null
+   },
+   "id": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "leaveType": {
+    "type": "LeaveType",
+    "nullable": false,
+    "default": "'FULL_DAY'::\"LeaveType\""
+   },
+   "reason": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "reviewedAt": {
+    "type": "timestamp",
+    "nullable": true,
+    "default": null
+   },
+   "reviewedById": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "status": {
+    "type": "LeaveStatus",
+    "nullable": false,
+    "default": "'PENDING'::\"LeaveStatus\""
+   },
+   "updatedAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": null
+   }
+  },
+  "subtask_templates": {
+   "clientId": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "createdAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP"
+   },
+   "id": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "isActive": {
+    "type": "bool",
+    "nullable": false,
+    "default": "true"
+   },
+   "orderIndex": {
+    "type": "int4",
+    "nullable": false,
+    "default": null
+   },
+   "taskType": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "title": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "updatedAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": null
+   }
+  },
+  "subtasks": {
+   "carryForwardApprovedAt": {
+    "type": "timestamp",
+    "nullable": true,
+    "default": null
+   },
+   "carryForwardApprovedById": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "carryForwardRejectedAt": {
+    "type": "timestamp",
+    "nullable": true,
+    "default": null
+   },
+   "carryForwardRequestedAt": {
+    "type": "timestamp",
+    "nullable": true,
+    "default": null
+   },
+   "completedAt": {
+    "type": "timestamp",
+    "nullable": true,
+    "default": null
+   },
+   "createdAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP"
+   },
+   "id": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "incompletionReason": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "isCarriedForward": {
+    "type": "bool",
+    "nullable": false,
+    "default": "false"
+   },
+   "isCompleted": {
+    "type": "bool",
+    "nullable": false,
+    "default": "false"
+   },
+   "sourceSubtaskId": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "taskId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "title": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "updatedAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": null
+   }
+  },
+  "tasks": {
+   "completedAt": {
+    "type": "timestamp",
+    "nullable": true,
+    "default": null
+   },
+   "createdAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP"
+   },
+   "description": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "id": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "mdMeetingAnswer": {
+    "type": "MdMeetingAnswer",
+    "nullable": true,
+    "default": null
+   },
+   "orderIndex": {
+    "type": "int4",
+    "nullable": false,
+    "default": null
+   },
+   "status": {
+    "type": "TaskStatus",
+    "nullable": false,
+    "default": "'PENDING'::\"TaskStatus\""
+   },
+   "taskType": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "title": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "updatedAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": null
+   },
+   "visitId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   }
+  },
+  "users": {
+   "createdAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP"
+   },
+   "email": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "id": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "isActive": {
+    "type": "bool",
+    "nullable": false,
+    "default": "true"
+   },
+   "name": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "passwordHash": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "phone": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "role": {
+    "type": "Role",
+    "nullable": false,
+    "default": null
+   },
+   "updatedAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": null
+   }
+  },
+  "visit_assignments": {
+   "createdAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP"
+   },
+   "executiveId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "id": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "role": {
+    "type": "VisitRole",
+    "nullable": false,
+    "default": "'MEMBER'::\"VisitRole\""
+   },
+   "visitId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   }
+  },
+  "visit_delegations": {
+   "createdAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP"
+   },
+   "fromExecutiveId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "id": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "leaveDate": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": null
+   },
+   "leaveReason": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "rejectionReason": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "status": {
+    "type": "DelegationStatus",
+    "nullable": false,
+    "default": "'PENDING'::\"DelegationStatus\""
+   },
+   "toExecutiveId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "updatedAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": null
+   },
+   "visitId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   }
+  },
+  "visit_photos": {
+   "contentType": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "createdAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP"
+   },
+   "gpsLatitude": {
+    "type": "float8",
+    "nullable": true,
+    "default": null
+   },
+   "gpsLongitude": {
+    "type": "float8",
+    "nullable": true,
+    "default": null
+   },
+   "id": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "originalName": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "s3Key": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "sizeBytes": {
+    "type": "int4",
+    "nullable": false,
+    "default": null
+   },
+   "uploadedById": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "visitId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   }
+  },
+  "visit_reassignments": {
+   "createdAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP"
+   },
+   "fromExecutiveId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "id": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "reason": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "reassignedById": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "toExecutiveId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "visitId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   }
+  },
+  "visits": {
+   "clientId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "closedAt": {
+    "type": "timestamp",
+    "nullable": true,
+    "default": null
+   },
+   "createdAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP"
+   },
+   "endDate": {
+    "type": "timestamp",
+    "nullable": true,
+    "default": null
+   },
+   "executiveId": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "id": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "notes": {
+    "type": "text",
+    "nullable": true,
+    "default": null
+   },
+   "openedAt": {
+    "type": "timestamp",
+    "nullable": true,
+    "default": null
+   },
+   "scheduledDate": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": null
+   },
+   "selectedSubtaskTemplateIds": {
+    "type": "_text",
+    "nullable": true,
+    "default": "ARRAY[]::text[]"
+   },
+   "selectedTaskTypes": {
+    "type": "_text",
+    "nullable": true,
+    "default": "ARRAY[]::text[]"
+   },
+   "status": {
+    "type": "VisitStatus",
+    "nullable": false,
+    "default": "'PENDING'::\"VisitStatus\""
+   },
+   "summaryJson": {
+    "type": "jsonb",
+    "nullable": true,
+    "default": null
+   },
+   "updatedAt": {
+    "type": "timestamp",
+    "nullable": false,
+    "default": null
+   },
+   "visitNumber": {
+    "type": "text",
+    "nullable": false,
+    "default": null
+   },
+   "visitType": {
+    "type": "VisitType",
+    "nullable": false,
+    "default": "'SOLO'::\"VisitType\""
+   }
+  }
+ },
+ "enums": {
+  "ActivityAction": [
+   "VISIT_CREATED",
+   "VISIT_OPENED",
+   "VISIT_CLOSED",
+   "TASK_STARTED",
+   "TASK_COMPLETED",
+   "SUBTASK_COMPLETED",
+   "SUBTASK_INCOMPLETE",
+   "CARRY_FORWARD_APPLIED",
+   "SUMMARY_GENERATED",
+   "USER_LOGIN",
+   "USER_LOGOUT",
+   "EXECUTIVE_ADDED",
+   "EXECUTIVE_UPDATED",
+   "EXECUTIVE_DEACTIVATED",
+   "EXECUTIVE_PASSWORD_RESET",
+   "EXECUTIVE_DELETED",
+   "CLIENT_ADDED",
+   "CLIENT_UPDATED",
+   "CLIENT_ARCHIVED",
+   "CLIENT_DELETED",
+   "VISIT_REASSIGNED",
+   "VISIT_REMOVED",
+   "SUBTASK_TEMPLATE_UPDATED",
+   "ADMIN_ADDED",
+   "ADMIN_UPDATED",
+   "ADMIN_DEACTIVATED",
+   "ADMIN_PASSWORD_RESET"
+  ],
+  "DelegationStatus": [
+   "PENDING",
+   "ACCEPTED",
+   "REJECTED"
+  ],
+  "HalfDayPeriod": [
+   "FIRST_HALF",
+   "SECOND_HALF"
+  ],
+  "LeaveStatus": [
+   "PENDING",
+   "APPROVED",
+   "REJECTED"
+  ],
+  "LeaveType": [
+   "FULL_DAY",
+   "HALF_DAY"
+  ],
+  "MdMeetingAnswer": [
+   "YES",
+   "NO"
+  ],
+  "Role": [
+   "ADMIN",
+   "EXECUTIVE",
+   "SUPER_ADMIN"
+  ],
+  "TaskStatus": [
+   "PENDING",
+   "IN_PROGRESS",
+   "COMPLETED",
+   "PARTIALLY_COMPLETED"
+  ],
+  "TaskType": [
+   "OPERATIONAL_VERIFICATION",
+   "STOCK_VERIFICATION",
+   "AVF_REPORT",
+   "ACCOUNTS_VERIFICATION",
+   "MR_MONTHLY_REPORT",
+   "MD_MEETING"
+  ],
+  "VisitRole": [
+   "LEAD",
+   "MEMBER"
+  ],
+  "VisitStatus": [
+   "PENDING",
+   "OPEN",
+   "CLOSED",
+   "CANCELLED"
+  ],
+  "VisitType": [
+   "SOLO",
+   "TEAM"
+  ]
+ },
+ "indexes": {
+  "activity_logs_action_createdAt_idx": "activity_logs",
+  "activity_logs_pkey": "activity_logs",
+  "activity_logs_userId_createdAt_idx": "activity_logs",
+  "activity_logs_visitId_idx": "activity_logs",
+  "admin_operations_createdAt_idx": "admin_operations",
+  "admin_operations_pkey": "admin_operations",
+  "attendance_executiveId_date_key": "attendance",
+  "attendance_pkey": "attendance",
+  "client_task_types_clientId_taskType_key": "client_task_types",
+  "client_task_types_pkey": "client_task_types",
+  "clients_code_key": "clients",
+  "clients_pkey": "clients",
+  "leave_requests_executiveId_date_key": "leave_requests",
+  "leave_requests_pkey": "leave_requests",
+  "subtask_templates_clientId_taskType_idx": "subtask_templates",
+  "subtask_templates_pkey": "subtask_templates",
+  "subtasks_carryForwardRequestedAt_idx": "subtasks",
+  "subtasks_isCarriedForward_idx": "subtasks",
+  "subtasks_pkey": "subtasks",
+  "subtasks_sourceSubtaskId_idx": "subtasks",
+  "subtasks_taskId_sourceSubtaskId_key": "subtasks",
+  "tasks_pkey": "tasks",
+  "tasks_visitId_taskType_key": "tasks",
+  "users_email_key": "users",
+  "users_phone_key": "users",
+  "users_pkey": "users",
+  "visit_assignments_pkey": "visit_assignments",
+  "visit_assignments_visitId_executiveId_key": "visit_assignments",
+  "visit_delegations_pkey": "visit_delegations",
+  "visit_delegations_toExecutiveId_status_idx": "visit_delegations",
+  "visit_delegations_visitId_idx": "visit_delegations",
+  "visit_photos_pkey": "visit_photos",
+  "visit_photos_s3Key_key": "visit_photos",
+  "visit_photos_visitId_idx": "visit_photos",
+  "visit_reassignments_pkey": "visit_reassignments",
+  "visit_reassignments_visitId_idx": "visit_reassignments",
+  "visits_clientId_idx": "visits",
+  "visits_executiveId_idx": "visits",
+  "visits_pkey": "visits",
+  "visits_scheduledDate_idx": "visits",
+  "visits_status_idx": "visits",
+  "visits_updatedAt_idx": "visits",
+  "visits_visitNumber_key": "visits"
+ },
+ "foreignKeys": {
+  "activity_logs_userId_fkey": "activity_logs",
+  "activity_logs_visitId_fkey": "activity_logs",
+  "admin_operations_undoneById_fkey": "admin_operations",
+  "admin_operations_userId_fkey": "admin_operations",
+  "attendance_executiveId_fkey": "attendance",
+  "client_task_types_clientId_fkey": "client_task_types",
+  "clients_assignedExecId_fkey": "clients",
+  "leave_requests_executiveId_fkey": "leave_requests",
+  "leave_requests_reviewedById_fkey": "leave_requests",
+  "subtask_templates_clientId_fkey": "subtask_templates",
+  "subtasks_carryForwardApprovedById_fkey": "subtasks",
+  "subtasks_sourceSubtaskId_fkey": "subtasks",
+  "subtasks_taskId_fkey": "subtasks",
+  "tasks_visitId_fkey": "tasks",
+  "visit_assignments_executiveId_fkey": "visit_assignments",
+  "visit_assignments_visitId_fkey": "visit_assignments",
+  "visit_delegations_fromExecutiveId_fkey": "visit_delegations",
+  "visit_delegations_toExecutiveId_fkey": "visit_delegations",
+  "visit_delegations_visitId_fkey": "visit_delegations",
+  "visit_photos_uploadedById_fkey": "visit_photos",
+  "visit_photos_visitId_fkey": "visit_photos",
+  "visit_reassignments_fromExecutiveId_fkey": "visit_reassignments",
+  "visit_reassignments_reassignedById_fkey": "visit_reassignments",
+  "visit_reassignments_toExecutiveId_fkey": "visit_reassignments",
+  "visit_reassignments_visitId_fkey": "visit_reassignments",
+  "visits_clientId_fkey": "visits",
+  "visits_executiveId_fkey": "visits"
+ }
+}
