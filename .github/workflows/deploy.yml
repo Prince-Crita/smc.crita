@@ -34,7 +34,7 @@ permissions:
 
 env:
   DEPLOY_PATH: /opt/smc-task-management
-  SERVICE_NAME: smc-task
+  SERVICE_NAME: smc-task-management
   HEALTH_PATH: /client-trial/smc-task-management/login
 
 jobs:
