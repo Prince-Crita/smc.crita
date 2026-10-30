@@ -116,8 +116,14 @@ jobs:
             "${TARGET}:${STAGING}/"
 
           # Root replaces the live folder, so leftover directories the login
-          # user cannot delete (stable/, deploy/) do not block the release.
-          sudo_ssh "rsync -a --delete '${STAGING}/' '${DEPLOY_PATH}/'"
+          # user cannot delete do not block the release. Keep the server's
+          # env file. Then give the service user ownership: the process must
+          # be able to create .next/cache (image optimizer) at runtime.
+          sudo_ssh "rsync -a --delete --exclude .env --exclude '.env.*' '${STAGING}/' '${DEPLOY_PATH}/'"
+          owner="$("${SSH[@]}" "$TARGET" "systemctl show -p User --value '${SERVICE_NAME}'" || true)"
+          owner="${owner:-$VPS_USER}"
+          sudo_ssh "mkdir -p '${DEPLOY_PATH}/.next/cache'"
+          sudo_ssh "chown -R '${owner}:${owner}' '${DEPLOY_PATH}'"
           sudo_ssh "systemctl restart '${SERVICE_NAME}'"
 
           code=""

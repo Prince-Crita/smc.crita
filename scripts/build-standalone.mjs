@@ -174,6 +174,16 @@ for (const [label, path, why] of checks) {
 }
 if (failed) die(`${failed} required item(s) missing from the package.`);
 
+// The visit page includes Visit.photos. A client generated before that model
+// existed still ships, and Next will build the page anyway
+// (typescript.ignoreBuildErrors). The page then crashes in production with
+// "Unknown field photos". Refuse that package.
+const generatedClient = join(outDir, "node_modules/.prisma/client/index.js");
+let clientHasPhotos = false;
+try { clientHasPhotos = readFileSync(generatedClient, "utf8").includes("visit_photos"); } catch { /* missing */ }
+console.log(`      ${clientHasPhotos ? "\x1b[32mOK  \x1b[0m" : "\x1b[31mMISS\x1b[0m"} ${"VisitPhoto in Prisma client".padEnd(30)} admin visit page includes photos`);
+if (!clientHasPhotos) die("Prisma client was generated without VisitPhoto. Run prisma generate against the current schema and rebuild.");
+
 // Bundled-in code is verified by its string literals rather than by a folder.
 const serverDir = join(outDir, ".next/server");
 const grepAll = (needle) => {
