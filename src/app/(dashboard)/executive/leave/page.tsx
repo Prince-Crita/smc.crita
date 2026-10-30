@@ -147,14 +147,17 @@ function LiveClock({ punchIn }: { punchIn: string | null }) {
     );
     duration = fmtMinutes(elapsed);
   }
+  // The server renders the time it had; the browser's clock has moved on by
+  // the time it hydrates. Expected for a live clock, so the text mismatch is
+  // not reported (the interval above corrects it within a second).
   return (
     <div className="text-center">
-      <p className="text-3xl font-black text-white tracking-wider tabular-nums font-mono">
+      <p className="text-3xl font-black text-white tracking-wider tabular-nums font-mono" suppressHydrationWarning>
         {timeStr}
       </p>
-      <p className="text-sm text-white/70 mt-1">{dateStr}</p>
+      <p className="text-sm text-white/70 mt-1" suppressHydrationWarning>{dateStr}</p>
       {duration && (
-        <p className="text-xs text-white/60 mt-0.5">Working: {duration}</p>
+        <p className="text-xs text-white/60 mt-0.5" suppressHydrationWarning>Working: {duration}</p>
       )}
     </div>
   );
