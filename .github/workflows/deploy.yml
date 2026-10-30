@@ -1,0 +1,128 @@
+# Builds the standalone package on Linux (so sharp matches the VPS) and,
+# on main, copies deployment/app/ to the server and restarts the service.
+#
+# Required repository secrets:
+#   VPS_HOST          server hostname or IP
+#   VPS_USER          SSH user that can write DEPLOY_PATH
+#   VPS_SSH_PASSWORD  that user's SSH login password
+#
+# Optional secret:
+#   VPS_PORT          SSH port, defaults to 22
+#
+# The VPS sshd must allow password login (PasswordAuthentication yes).
+#
+# The app's DATABASE_URL and JWT_SECRET stay in /etc/smc-task/env on the VPS.
+# This workflow never uploads an env file.
+#
+# One-time server setup so the deploy user can restart without a password:
+#   sudo visudo -f /etc/sudoers.d/smc-deploy
+#   smc ALL=(ALL) NOPASSWD: /bin/systemctl restart smc-task, /bin/systemctl is-active smc-task, /bin/journalctl -u smc-task *
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  DEPLOY_PATH: /opt/smc-task-management
+  SERVICE_NAME: smc-task
+  HEALTH_PATH: /client-trial/smc-task-management/login
+
+jobs:
+  build:
+    name: Build standalone package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build:standalone
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-app
+          path: deployment/app
+          retention-days: 7
+          include-hidden-files: true
+
+  deploy:
+    name: Deploy to VPS
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Download package
+        uses: actions/download-artifact@v4
+        with:
+          name: standalone-app
+          path: deployment/app
+
+      - name: Install sshpass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Upload and restart
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          SSHPASS: ${{ secrets.VPS_SSH_PASSWORD }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${VPS_HOST}" ] || [ -z "${VPS_USER}" ] || [ -z "${SSHPASS}" ]; then
+            echo "Set VPS_HOST, VPS_USER, and VPS_SSH_PASSWORD repository secrets."
+            exit 1
+          fi
+          PORT="${VPS_PORT:-22}"
+
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "$PORT" -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+          SSH_OPTS=(-p "$PORT" -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1)
+          SSH=(sshpass -e ssh "${SSH_OPTS[@]}")
+          RSYNC_RSH="sshpass -e ssh -p ${PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1"
+
+          rsync -az --delete \
+            --exclude '.env' \
+            --exclude '.env.*' \
+            -e "$RSYNC_RSH" \
+            deployment/app/ \
+            "${VPS_USER}@${VPS_HOST}:${DEPLOY_PATH}/"
+
+          "${SSH[@]}" "${VPS_USER}@${VPS_HOST}" \
+            "DEPLOY_PATH='${DEPLOY_PATH}' SERVICE_NAME='${SERVICE_NAME}' HEALTH_PATH='${HEALTH_PATH}' bash -s" <<'EOF'
+          set -euo pipefail
+          sudo systemctl restart "$SERVICE_NAME"
+          for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3000${HEALTH_PATH}" || true)"
+            if [ "$code" = "200" ]; then
+              echo "healthy: ${HEALTH_PATH} -> ${code}"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "health check failed (last status: ${code:-none})"
+          sudo journalctl -u "$SERVICE_NAME" -n 80 --no-pager || true
+          exit 1
+          EOF
