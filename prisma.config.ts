@@ -54,6 +54,6 @@ export default defineConfig({
   },
   migrations: {
     // Seeding follows the same precedence — local development by default.
-    seed: "tsx --env-file=.env.development.local prisma/seed.ts",
+    seed: "tsx --env-file=.env.local prisma/seed.ts",
   },
 });
