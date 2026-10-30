@@ -14,9 +14,8 @@
 # The app's DATABASE_URL and JWT_SECRET stay in /etc/smc-task/env on the VPS.
 # This workflow never uploads an env file.
 #
-# One-time server setup so the deploy user can restart without a password:
-#   sudo visudo -f /etc/sudoers.d/smc-deploy
-#   smc ALL=(ALL) NOPASSWD: /bin/systemctl restart smc-task, /bin/systemctl is-active smc-task, /bin/journalctl -u smc-task *
+# VPS_SSH_PASSWORD is used both to log in and to answer sudo (sudo -S).
+# The account must be allowed to run sudo. Passwordless sudo is not required.
 
 name: Deploy
 
@@ -102,20 +101,31 @@ jobs:
           SSH_OPTS=(-p "$PORT" -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1)
           SSH=(sshpass -e ssh "${SSH_OPTS[@]}")
           RSYNC_RSH="sshpass -e ssh -p ${PORT} -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1"
+          STAGING="/tmp/smc-task-incoming"
+          TARGET="${VPS_USER}@${VPS_HOST}"
 
-          rsync -az --delete \
+          # sshpass -e reads SSHPASS, so stdin can be the sudo password.
+          sudo_ssh() {
+            printf '%s\n' "$SSHPASS" | "${SSH[@]}" "$TARGET" "sudo -S -p '' $1"
+          }
+
+          "${SSH[@]}" "$TARGET" "rm -rf '${STAGING}' && mkdir -p '${STAGING}'"
+
+          rsync -az \
             --exclude '.env' \
             --exclude '.env.*' \
             -e "$RSYNC_RSH" \
             deployment/app/ \
-            "${VPS_USER}@${VPS_HOST}:${DEPLOY_PATH}/"
+            "${TARGET}:${STAGING}/"
 
-          "${SSH[@]}" "${VPS_USER}@${VPS_HOST}" \
-            "DEPLOY_PATH='${DEPLOY_PATH}' SERVICE_NAME='${SERVICE_NAME}' HEALTH_PATH='${HEALTH_PATH}' bash -s" <<'EOF'
-          set -euo pipefail
-          sudo systemctl restart "$SERVICE_NAME"
+          # Root replaces the live folder, so leftover directories the login
+          # user cannot delete (stable/, deploy/) do not block the release.
+          sudo_ssh "rsync -a --delete '${STAGING}/' '${DEPLOY_PATH}/'"
+          sudo_ssh "systemctl restart '${SERVICE_NAME}'"
+
+          code=""
           for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-            code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3000${HEALTH_PATH}" || true)"
+            code="$("${SSH[@]}" "$TARGET" "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3000${HEALTH_PATH}'" || true)"
             if [ "$code" = "200" ]; then
               echo "healthy: ${HEALTH_PATH} -> ${code}"
               exit 0
@@ -123,6 +133,5 @@ jobs:
             sleep 2
           done
           echo "health check failed (last status: ${code:-none})"
-          sudo journalctl -u "$SERVICE_NAME" -n 80 --no-pager || true
+          sudo_ssh "journalctl -u '${SERVICE_NAME}' -n 80 --no-pager" || true
           exit 1
-          EOF
