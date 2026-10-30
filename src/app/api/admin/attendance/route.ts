@@ -62,9 +62,20 @@ export async function GET(request: NextRequest) {
       orderBy: { name: "asc" },
     });
 
-    return NextResponse.json({ records, executives });
+    const isSunday = dateParam
+      ? new Date(`${dateParam}T12:00:00Z`).getUTCDay() === 0
+      : false;
+
+    return NextResponse.json({
+      records,
+      executives,
+      isSunday,
+    });
   } catch (error) {
     console.error("Admin attendance GET error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }
