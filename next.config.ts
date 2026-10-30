@@ -33,6 +33,9 @@ const nextConfig: NextConfig = {
   // Serve from a sub-path only when explicitly configured; "" = domain root.
   ...(basePath ? { basePath } : {}),
 
+  // Ensure the client bundle receives the mount point (required for fetch patching).
+  ...(basePath ? { env: { NEXT_PUBLIC_BASE_PATH: basePath } } : {}),
+
   // Emit .next/standalone for self-managed deployment; off on Vercel.
   ...(standalone ? { output: "standalone" as const } : {}),
 
