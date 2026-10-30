@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import Link from "next/link";
 import {
   Clock,
   LogIn,
@@ -1230,13 +1231,13 @@ export default function LeavePage() {
         </div>
       )}
 
-      {/* -- Footer link -- */}
-      <a
+      {/* -- Footer link -- (Link, not <a>: keeps the company-server mount path) */}
+      <Link
         href="/executive/visits"
         className="flex items-center justify-center gap-1.5 text-xs font-semibold text-[#25488e] pb-2"
       >
         View My Visits <ChevronRight className="w-3.5 h-3.5" />
-      </a>
+      </Link>
     </div>
   );
 }
