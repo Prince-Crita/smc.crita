@@ -19,7 +19,8 @@ import { useLiveQuery, fetchJSON } from "@/lib/hooks/useLiveQuery";
 // Data comes from GET /api/calendar?view=tasks, which uses the calendar's own
 // week window and executive scope — an executive sees only their own and their
 // team visits, an admin sees every visit (or one executive's, with the
-// filter). The status filter is applied by the API on the real rows.
+// filter). The client, executive and status filters are all applied by the
+// API on the real rows; the client list is the week's own clients.
 //
 // Refreshes like the rest of the app: on week/filter change, on window focus
 // or tab visibility, and after any mutation that calls revalidateAll().
@@ -62,13 +63,17 @@ interface HistoryVisit {
   tasks: HistoryTask[];
 }
 
-type StatusFilter = "ALL" | "PENDING" | "COMPLETED" | "CLOSED";
+type StatusFilter = "ALL" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "CLOSED";
+
+interface ClientOption { id: string; name: string; code: string }
 
 interface WeekTaskHistoryData {
   weekNumber: number;
   monday: string;
   sunday: string;
   status: StatusFilter;
+  /** The week's clients in the caller's scope — the Client filter's options. */
+  clientOptions: ClientOption[];
   visits: HistoryVisit[];
   totals: {
     visits: number;
@@ -84,6 +89,7 @@ interface WeekTaskHistoryData {
 const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: "ALL", label: "All statuses" },
   { value: "PENDING", label: "Pending" },
+  { value: "IN_PROGRESS", label: "In Progress" },
   { value: "COMPLETED", label: "Completed" },
   { value: "CLOSED", label: "Closed" },
 ];
@@ -91,6 +97,7 @@ const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
 const EMPTY_MESSAGES: Record<StatusFilter, string> = {
   ALL: "No visits scheduled this week",
   PENDING: "No pending tasks this week",
+  IN_PROGRESS: "No tasks in progress this week",
   COMPLETED: "No completed tasks this week",
   CLOSED: "No closed visits this week",
 };
@@ -236,30 +243,41 @@ function VisitSection({ visit, visitHrefBase }: { visit: HistoryVisit; visitHref
 export function WeekTaskHistory({
   weekISO,
   executiveId,
+  executives,
+  onExecutiveChange,
   visitHrefBase,
 }: {
   /** Any instant inside the week to show — the Calendar's own week state. */
   weekISO: string;
   /** Admin only: narrow to one executive (ignored by the API for executives). */
   executiveId?: string;
+  /** Admin only: the executives for the Executive filter (shown when given). */
+  executives?: { id: string; name: string }[];
+  /** Admin only: change the executive — the Calendar's own executive filter. */
+  onExecutiveChange?: (executiveId: string) => void;
   /** Where "View visit" links to: "/admin/visits" or "/executive/visits". */
   visitHrefBase: string;
 }) {
   const [status, setStatus] = useState<StatusFilter>("ALL");
+  // The chosen client (kept, with its name, across weeks — a week without
+  // that client's visits shows it with an empty list rather than dropping it).
+  const [client, setClient] = useState<ClientOption | null>(null);
+  const clientId = client?.id ?? "";
   // Clients are collapsed until opened.
   const [expandedClients, setExpandedClients] = useState<Set<string>>(new Set());
 
   // The request key travels with the response, so a week/filter change never
   // shows the previous selection's data under the new heading while the new
-  // data is loading.
-  const requestKey = `${weekISO}|${executiveId ?? ""}|${status}`;
+  // data is loading. Every filter is applied by the API on the real rows.
+  const requestKey = `${weekISO}|${executiveId ?? ""}|${clientId}|${status}`;
   const fetchHistory = useCallback(async () => {
     const params = new URLSearchParams({ week: weekISO, view: "tasks" });
     if (executiveId) params.set("executiveId", executiveId);
+    if (clientId) params.set("clientId", clientId);
     if (status !== "ALL") params.set("status", status);
     const data = await fetchJSON<WeekTaskHistoryData>(`/api/calendar?${params.toString()}`);
-    return { key: `${weekISO}|${executiveId ?? ""}|${status}`, data };
-  }, [weekISO, executiveId, status]);
+    return { key: `${weekISO}|${executiveId ?? ""}|${clientId}|${status}`, data };
+  }, [weekISO, executiveId, clientId, status]);
 
   const { data: result, loading, error, refresh } = useLiveQuery(fetchHistory);
   const data = result && result.key === requestKey ? result.data : null;
@@ -314,10 +332,15 @@ export function WeekTaskHistory({
   }
 
   const { totals } = data;
+  const clientChoices = client && !data.clientOptions.some((c) => c.id === client.id)
+    ? [client, ...data.clientOptions]
+    : data.clientOptions;
+  const filterClass =
+    "border border-[#e2e7f0] rounded-lg px-3 py-1.5 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30 min-w-0";
 
   return (
     <div className="space-y-4">
-      {/* ── Week summary (whole week, whatever the filter) ── */}
+      {/* ── Week summary (whole week for the chosen client/executive) ── */}
       <div className="grid grid-cols-3 gap-3">
         {[
           { label: "Visits this week", value: `${totals.visits}`, color: "text-[#25488e]", Icon: ClipboardList },
@@ -334,16 +357,38 @@ export function WeekTaskHistory({
         ))}
       </div>
 
-      {/* ── Status filter + expand/collapse ── */}
+      {/* ── Filters (client · executive · status) + expand/collapse ── */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value as StatusFilter)}
-          aria-label="Filter by status"
-          className="border border-[#e2e7f0] rounded-lg px-3 py-1.5 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30"
-        >
-          {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
+          <select
+            value={clientId}
+            onChange={(e) => setClient(clientChoices.find((c) => c.id === e.target.value) ?? null)}
+            aria-label="Filter by client"
+            className={filterClass}
+          >
+            <option value="">All clients</option>
+            {clientChoices.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          {executives && onExecutiveChange && (
+            <select
+              value={executiveId ?? ""}
+              onChange={(e) => onExecutiveChange(e.target.value)}
+              aria-label="Filter by executive"
+              className={filterClass}
+            >
+              <option value="">All executives</option>
+              {executives.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+          )}
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as StatusFilter)}
+            aria-label="Filter by status"
+            className={filterClass}
+          >
+            {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
         {groups.length > 0 && (
           <button
             type="button"

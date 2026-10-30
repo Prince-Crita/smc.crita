@@ -184,8 +184,20 @@ function CreateVisitModal({ prefillDate, clients, executives, onClose, onCreated
     : [];
 
   const handleSubmit = async () => {
-    if (!clientId || !executiveId || !scheduledDate) {
-      toast.error("Please fill all required fields");
+    // Same required fields as before, but the message names the missing one:
+    // on a Team Visit the Team Lead is chosen in its own dropdown, separately
+    // from the member checkboxes, and a generic message hid that.
+    const missing = !scheduledDate
+      ? "Select the start date"
+      : !clientId
+      ? "Select a client"
+      : !executiveId
+      ? visitType === "TEAM"
+        ? "Select the Team Lead (the dropdown above the team members)"
+        : "Select an executive"
+      : null;
+    if (missing) {
+      toast.error(missing);
       return;
     }
     if (planLoading) {
@@ -333,11 +345,6 @@ function CreateVisitModal({ prefillDate, clients, executives, onClose, onCreated
                             className="flex-1 min-w-0 flex items-center gap-2 text-left"
                           >
                             <span className="flex-1 min-w-0 text-sm text-[#0f1829] truncate">{t.title}</span>
-                            {t.isMonthly && (
-                              <span className="flex-shrink-0 text-[10px] font-bold text-[#800040] bg-[#800040]/10 px-1.5 py-0.5 rounded-full">
-                                Monthly
-                              </span>
-                            )}
                             <span className="flex-shrink-0 text-[11px] text-[#8896a9] tabular-nums">
                               {total > 0 ? `${ticked}/${total}` : "No subtasks"}
                             </span>
@@ -367,7 +374,7 @@ function CreateVisitModal({ prefillDate, clients, executives, onClose, onCreated
                 </div>
                 <p className="text-[11px] text-[#8896a9] mt-1">
                   {selectedTaskTypes.length} of {planTasks!.length} tasks · {orderedSubtaskIds.length} subtask{orderedSubtaskIds.length === 1 ? "" : "s"} selected.
-                  Open a task to choose its subtasks. Only ticked items are added to this visit — monthly tasks only when ticked.
+                  Open a task to choose its subtasks. Only ticked items are added to this visit.
                   The client&apos;s Task Configuration is not changed.
                 </p>
               </>
@@ -841,7 +848,9 @@ export default function AdminCalendarPage() {
             {executives.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
           <button
-            onClick={() => handleAddVisit(data?.days[0]?.date.split("T")[0] ?? "")}
+            // Before the week's data has loaded, fall back to the displayed week
+            // itself — an empty start date blocked creation with a required-field error.
+            onClick={() => handleAddVisit(data?.days[0]?.date.split("T")[0] ?? weekISO.slice(0, 10))}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-[#25488e] hover:bg-[#1e3a72] text-white text-xs font-semibold rounded-lg transition-colors press-effect"
           >
             <Plus className="w-3.5 h-3.5" /> New Visit
@@ -902,7 +911,13 @@ export default function AdminCalendarPage() {
 
       {/* ── Task History: the same week, task/subtask level ── */}
       {view === "history" && (
-        <WeekTaskHistory weekISO={weekISO} executiveId={execFilter || undefined} visitHrefBase="/admin/visits" />
+        <WeekTaskHistory
+          weekISO={weekISO}
+          executiveId={execFilter || undefined}
+          executives={executives}
+          onExecutiveChange={setExecFilter}
+          visitHrefBase="/admin/visits"
+        />
       )}
 
       {/* ── Calendar grid: full week, no horizontal scroll ── */}

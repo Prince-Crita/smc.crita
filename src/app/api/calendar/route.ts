@@ -62,7 +62,9 @@ export async function GET(request: NextRequest) {
 
     // Week-wise Task History — same visits, task-level detail.
     if (searchParams.get("view") === "tasks") {
-      return NextResponse.json(await buildWeekTaskHistory(where, monday, sunday, searchParams.get("status")));
+      return NextResponse.json(
+        await buildWeekTaskHistory(where, monday, sunday, searchParams.get("status"), searchParams.get("clientId"))
+      );
     }
 
     const visits = await prisma.visit.findMany({
@@ -172,27 +174,45 @@ function historyTaskStatus(
 }
 
 /**
- * Task History status filter, applied on the server to the week's real rows:
- *   PENDING   - a task not yet completed, on a visit that is still open
- *   COMPLETED - a task whose subtasks are all completed (open or closed visit)
- *   CLOSED    - every task of a visit that has been closed
+ * Task History status filter, applied on the server to the week's real rows.
+ * Each value matches the status badge the history shows on a task:
+ *   PENDING     - a task not started yet, on a visit that is still open
+ *   IN_PROGRESS - a task started but not finished, on a visit that is still open
+ *   COMPLETED   - a completed task (open or closed visit)
+ *   CLOSED      - every task of a visit that has been closed
  * Anything else (or nothing) = all tasks.
  */
-type HistoryStatusFilter = "ALL" | "PENDING" | "COMPLETED" | "CLOSED";
+type HistoryStatusFilter = "ALL" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "CLOSED";
 
 function parseHistoryStatus(value: string | null): HistoryStatusFilter {
-  return value === "PENDING" || value === "COMPLETED" || value === "CLOSED" ? value : "ALL";
+  return value === "PENDING" || value === "IN_PROGRESS" || value === "COMPLETED" || value === "CLOSED" ? value : "ALL";
 }
 
 async function buildWeekTaskHistory(
   where: Prisma.VisitWhereInput,
   monday: Date,
   sunday: Date,
-  statusParam: string | null
+  statusParam: string | null,
+  clientIdParam: string | null
 ) {
   const status = parseHistoryStatus(statusParam);
+  const clientId = clientIdParam?.trim() || null;
+
+  // The week's clients within the caller's own scope (an executive: only their
+  // visits), for the Client filter. Built before the client filter applies, so
+  // choosing a client never empties its own dropdown.
+  const clientOptions = (
+    await prisma.visit.findMany({
+      where,
+      distinct: ["clientId"],
+      select: { client: { select: { id: true, name: true, code: true } } },
+    })
+  )
+    .map((v) => v.client)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
   const visits = await prisma.visit.findMany({
-    where,
+    where: clientId ? { ...where, clientId } : where,
     select: {
       id: true,
       visitNumber: true,
@@ -240,7 +260,8 @@ async function buildWeekTaskHistory(
     orderBy: { scheduledDate: "asc" },
   });
 
-  // Week totals always describe the whole week, whatever filter is applied.
+  // Week totals describe the whole week for the chosen client/executive,
+  // whatever status filter is applied.
   const totals = {
     visits: visits.length,
     closedVisits: 0,
@@ -322,10 +343,10 @@ async function buildWeekTaskHistory(
   const filtered =
     status === "CLOSED"
       ? rows.filter((v) => v.status === "CLOSED")
-      : status === "PENDING"
+      : status === "PENDING" || status === "IN_PROGRESS"
       ? rows
           .filter((v) => v.status !== "CLOSED")
-          .map((v) => ({ ...v, tasks: v.tasks.filter((t) => t.status !== "COMPLETED") }))
+          .map((v) => ({ ...v, tasks: v.tasks.filter((t) => t.status === status) }))
           .filter((v) => v.tasks.length > 0)
       : status === "COMPLETED"
       ? rows
@@ -338,6 +359,8 @@ async function buildWeekTaskHistory(
     monday: monday.toISOString(),
     sunday: sunday.toISOString(),
     status,
+    clientId,
+    clientOptions,
     visits: filtered,
     totals,
   };
