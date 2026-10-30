@@ -197,14 +197,20 @@ export default function AdminLeavesPage() {
     new Date().toISOString().slice(0, 7),
   );
 
+  // Pending is the admin's to-do list: every request still waiting for a
+  // decision is shown, whatever its month. Leave is requested for today or
+  // later, so a request for next month would otherwise be hidden behind the
+  // current-month filter. The month filter narrows the reviewed lists only.
+  const monthApplies = statusFilter !== "PENDING";
+
   const fetchLeaves = useCallback(async () => {
     const params = new URLSearchParams({ status: statusFilter });
-    if (monthFilter) params.set("month", monthFilter);
+    if (monthFilter && monthApplies) params.set("month", monthFilter);
     const json = await fetchJSON<{ leaves: LeaveRequest[] }>(
       `/api/admin/leaves?${params.toString()}`,
     );
     return json.leaves ?? [];
-  }, [statusFilter, monthFilter]);
+  }, [statusFilter, monthFilter, monthApplies]);
 
   const { data, loading, refresh: refreshLeaves } = useLiveQuery(fetchLeaves);
   const leaves = data ?? [];
@@ -283,22 +289,26 @@ export default function AdminLeavesPage() {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="month"
-            value={monthFilter}
-            onChange={(e) => setMonthFilter(e.target.value)}
-            className="border border-[#e2e7f0] rounded-lg px-3 py-2 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30"
-          />
-          {monthFilter && (
-            <button
-              onClick={() => setMonthFilter("")}
-              className="text-xs font-semibold text-[#25488e] hover:text-[#1e3a72] px-2 py-1 transition-colors"
-            >
-              All time
-            </button>
-          )}
-        </div>
+        {monthApplies ? (
+          <div className="flex items-center gap-2">
+            <input
+              type="month"
+              value={monthFilter}
+              onChange={(e) => setMonthFilter(e.target.value)}
+              className="border border-[#e2e7f0] rounded-lg px-3 py-2 text-sm text-[#0f1829] bg-white focus:outline-none focus:ring-2 focus:ring-[#25488e]/30"
+            />
+            {monthFilter && (
+              <button
+                onClick={() => setMonthFilter("")}
+                className="text-xs font-semibold text-[#25488e] hover:text-[#1e3a72] px-2 py-1 transition-colors"
+              >
+                All time
+              </button>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-[#8896a9]">Showing every pending request, all months</p>
+        )}
       </div>
 
       {/* ── Leave cards ── */}
